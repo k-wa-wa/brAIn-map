@@ -9,7 +9,7 @@ import {
   type TLRichText,
 } from "tldraw";
 import "tldraw/tldraw.css";
-import type { CanvasState, CanvasNode } from "@brain-map/shared";
+import type { CanvasState, CanvasNode, CanvasEdge } from "@brain-map/shared";
 import { api } from "./api.js";
 
 // tldraw color values that map to our palette
@@ -39,6 +39,21 @@ function nodeToTldraw(node: CanvasNode) {
   };
 }
 
+function edgeToTldraw(edge: CanvasEdge) {
+  return {
+    id: createShapeId(edge.id) as TLShapeId,
+    type: "arrow" as const,
+    x: 0,
+    y: 0,
+    props: {
+      start: { x: 0, y: 0 },
+      end: { x: 0, y: 0 },
+      text: edge.label || "",
+    },
+    meta: { brainMapEdgeId: edge.id },
+  };
+}
+
 function getTextFromProps(props: Record<string, unknown>, editor: Editor): string {
   const richText = props["richText"] as TLRichText | undefined;
   if (!richText) return "";
@@ -58,11 +73,51 @@ export function CanvasView({ canvas }: Props) {
     (editor: Editor) => {
       editorRef.current = editor;
 
+      const shapes = [];
+      const bindings = [];
+
       if (canvas.nodes.length > 0) {
-        const shapes = canvas.nodes.map(nodeToTldraw);
+        shapes.push(...canvas.nodes.map(nodeToTldraw));
+      }
+
+      if (canvas.edges.length > 0) {
+        shapes.push(...canvas.edges.map(edgeToTldraw));
+        
+        for (const edge of canvas.edges) {
+          const arrowId = createShapeId(edge.id);
+          bindings.push({
+            type: 'arrow',
+            fromId: arrowId,
+            toId: createShapeId(edge.fromNodeId),
+            props: {
+              terminal: 'start',
+              normalizedAnchor: { x: 0.5, y: 0.5 },
+              isExact: false,
+              isPrecise: true
+            }
+          });
+          bindings.push({
+            type: 'arrow',
+            fromId: arrowId,
+            toId: createShapeId(edge.toNodeId),
+            props: {
+              terminal: 'end',
+              normalizedAnchor: { x: 0.5, y: 0.5 },
+              isExact: false,
+              isPrecise: true
+            }
+          });
+        }
+      }
+
+      if (shapes.length > 0) {
         // Mark these as server-originated so we don't re-save them
         shapes.forEach((s) => serverCreatedIds.current.add(s.id));
         editor.createShapes(shapes);
+      }
+      
+      if (bindings.length > 0) {
+        editor.createBindings(bindings as any);
       }
 
       editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {

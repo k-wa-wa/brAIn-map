@@ -33,19 +33,25 @@ function randomPosition() {
 }
 
 export function registerTools(server: McpServer) {
-  server.tool("get_canvas_state", "Get the full current state of the canvas", {}, async () => {
-    return ok(getCanvasState());
-  });
+  server.registerTool(
+    "get_canvas_state",
+    { description: "Get the full current state of the canvas" },
+    async () => {
+      return ok(getCanvasState());
+    }
+  );
 
-  server.tool(
+  server.registerTool(
     "add_node",
-    "Add a new sticky note or text node to the canvas",
     {
-      text: z.string().min(1).describe("Content of the node"),
-      type: NodeTypeSchema.optional().describe("Node type: sticky | text | shape"),
-      color: NodeColorSchema.optional().describe("Color: yellow | blue | green | red | purple | orange | pink | gray"),
-      position: PositionSchema.optional().describe("Position {x, y} on canvas"),
-      groupId: z.string().uuid().optional().describe("Group ID to assign"),
+      description: "Add a new sticky note or text node to the canvas",
+      inputSchema: {
+        text: z.string().min(1).describe("Content of the node"),
+        type: NodeTypeSchema.optional().describe("Node type: sticky | text | shape"),
+        color: NodeColorSchema.optional().describe("Color: yellow | blue | green | red | purple | orange | pink | gray"),
+        position: PositionSchema.optional().describe("Position {x, y} on canvas"),
+        groupId: z.string().uuid().optional().describe("Group ID to assign"),
+      }
     },
     async (input) => {
       const parsed = AddNodeInputSchema.parse(input);
@@ -60,15 +66,17 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "update_node",
-    "Update text, color, position, or group of an existing node",
     {
-      id: z.string().uuid().describe("Node ID"),
-      text: z.string().min(1).optional(),
-      color: NodeColorSchema.optional(),
-      position: PositionSchema.optional(),
-      groupId: z.string().uuid().nullable().optional().describe("null to ungroup"),
+      description: "Update text, color, position, or group of an existing node",
+      inputSchema: {
+        id: z.string().uuid().describe("Node ID"),
+        text: z.string().min(1).optional(),
+        color: NodeColorSchema.optional(),
+        position: PositionSchema.optional(),
+        groupId: z.string().uuid().nullable().optional().describe("null to ungroup"),
+      }
     },
     async (input) => {
       const parsed = UpdateNodeInputSchema.parse(input);
@@ -79,10 +87,12 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "delete_node",
-    "Delete a node and its connected edges",
-    { id: z.string().uuid() },
+    {
+      description: "Delete a node and its connected edges",
+      inputSchema: { id: z.string().uuid() }
+    },
     async (input) => {
       const parsed = DeleteNodeInputSchema.parse(input);
       const deleted = deleteNode(parsed.id);
@@ -92,13 +102,15 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "connect_nodes",
-    "Create a directional edge between two nodes",
     {
-      fromNodeId: z.string().uuid(),
-      toNodeId: z.string().uuid(),
-      label: z.string().optional(),
+      description: "Create a directional edge between two nodes",
+      inputSchema: {
+        fromNodeId: z.string().uuid(),
+        toNodeId: z.string().uuid(),
+        label: z.string().optional(),
+      }
     },
     async (input) => {
       const parsed = ConnectNodesInputSchema.parse(input);
@@ -108,10 +120,12 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "delete_edge",
-    "Remove a connection between nodes",
-    { id: z.string().uuid() },
+    {
+      description: "Remove a connection between nodes",
+      inputSchema: { id: z.string().uuid() }
+    },
     async (input) => {
       const parsed = DeleteEdgeInputSchema.parse(input);
       const deleted = deleteEdge(parsed.id);
@@ -121,13 +135,15 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "group_nodes",
-    "Cluster multiple nodes into a named group",
     {
-      nodeIds: z.array(z.string().uuid()).min(2),
-      groupName: z.string().min(1),
-      color: NodeColorSchema.optional(),
+      description: "Cluster multiple nodes into a named group",
+      inputSchema: {
+        nodeIds: z.array(z.string().uuid()).min(2),
+        groupName: z.string().min(1),
+        color: NodeColorSchema.optional(),
+      }
     },
     async (input) => {
       const parsed = GroupNodesInputSchema.parse(input);
@@ -137,12 +153,14 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "delete_group",
-    "Delete a group (optionally delete its nodes too)",
     {
-      id: z.string().uuid(),
-      deleteNodes: z.boolean().optional(),
+      description: "Delete a group (optionally delete its nodes too)",
+      inputSchema: {
+        id: z.string().uuid(),
+        deleteNodes: z.boolean().optional(),
+      }
     },
     async (input) => {
       const parsed = DeleteGroupInputSchema.parse(input);
