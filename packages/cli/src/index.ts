@@ -115,7 +115,7 @@ function startServer(opts: {
 
   // Decide which URL to open
   const useViteDev = !frontendDist && frontendSrc !== null;
-  const canvasUrl = useViteDev ? `http://localhost:${VITE_PORT}` : `http://localhost:${port}`;
+  const canvasUrl = `http://localhost:${port}`;
   const mcpUrl = `http://localhost:${port}/mcp/sse`;
 
   const env: NodeJS.ProcessEnv = {
@@ -124,6 +124,7 @@ function startServer(opts: {
     DB_PATH: dbPath,
     CANVAS_NAME: canvasName,
   };
+  if (useViteDev) env["VITE_PORT"] = String(VITE_PORT);
   if (frontendDist) env["FRONTEND_DIST"] = frontendDist;
 
   const server = spawn(serverArgs[0]!, serverArgs.slice(1), {
@@ -172,79 +173,30 @@ const program = new Command();
 program
   .name("brain-map")
   .description("AI-powered mind map for engineers")
-  .version("0.0.1");
-
-program
-  .command("new <name>")
-  .description("Create a new brain-map session and open it")
-  .option("-p, --port <port>", "Port to run on", "3000")
-  .option("--no-open", "Skip opening the browser")
-  .action((name: string, opts: { port: string; open: boolean }) => {
-    const slug = slugify(name);
-    const dbPath = resolve(process.cwd(), `${slug}${FILE_EXT}`);
-    if (existsSync(dbPath)) {
-      console.error(`File already exists: ${dbPath}`);
-      console.error(`Use 'brain-map open ${slug}${FILE_EXT}' to open it.`);
-      process.exit(1);
-    }
-    console.log(`Creating: ${basename(dbPath)}`);
-    startServer({ dbPath, canvasName: name, port: Number(opts.port), noOpen: !opts.open });
-  });
-
-program
-  .command("open [file]")
-  .description("Open an existing brain-map file (defaults to most recent)")
+  .version("0.0.1")
+  .argument("[file]", "The .brain-map file to open or create")
   .option("-p, --port <port>", "Port to run on", "3000")
   .option("--no-open", "Skip opening the browser")
   .action((file: string | undefined, opts: { port: string; open: boolean }) => {
-    let dbPath: string;
+    if (!file) {
+      console.error("Error: Please specify a file to open or create.");
+      console.error("Usage: npx brain-map <filename>");
+      console.error("Example: npx brain-map product-brainstorm");
+      process.exit(1);
+    }
 
-    if (file) {
-      dbPath = resolve(process.cwd(), file.endsWith(FILE_EXT) ? file : `${file}${FILE_EXT}`);
-      if (!existsSync(dbPath)) {
-        console.error(`File not found: ${dbPath}`);
-        process.exit(1);
-      }
+    const slug = slugify(basename(file, FILE_EXT));
+    const filename = file.endsWith(FILE_EXT) ? file : `${slug}${FILE_EXT}`;
+    const dbPath = resolve(process.cwd(), filename);
+
+    const isNew = !existsSync(dbPath);
+    if (isNew) {
+      console.log(`Creating: ${basename(dbPath)}`);
     } else {
-      const files = readdirSync(process.cwd()).filter((f) => f.endsWith(FILE_EXT));
-      if (files.length === 0) {
-        console.error("No .brain-map files found in current directory.");
-        console.error("Run 'brain-map new <name>' to create one.");
-        process.exit(1);
-      }
-      dbPath = resolve(process.cwd(), files[0]!);
       console.log(`Opening: ${basename(dbPath)}`);
     }
 
     const canvasName = basename(dbPath, FILE_EXT).replace(/-/g, " ");
-    startServer({ dbPath, canvasName, port: Number(opts.port), noOpen: !opts.open });
-  });
-
-program
-  .command("list")
-  .description("List brain-map files in the current directory")
-  .action(() => {
-    const files = readdirSync(process.cwd()).filter((f) => f.endsWith(FILE_EXT));
-    if (files.length === 0) {
-      console.log("No .brain-map files found.");
-      return;
-    }
-    files.forEach((f) => console.log(`  ${f}`));
-  });
-
-program
-  .command("start", { isDefault: true, hidden: true })
-  .option("-p, --port <port>", "Port to run on", "3000")
-  .option("--no-open", "Skip opening the browser")
-  .action((opts: { port: string; open: boolean }) => {
-    const files = readdirSync(process.cwd()).filter((f) => f.endsWith(FILE_EXT));
-    if (files.length === 0) {
-      console.error("No .brain-map files found. Run 'brain-map new <name>' to create one.");
-      process.exit(1);
-    }
-    const dbPath = resolve(process.cwd(), files[0]!);
-    const canvasName = basename(dbPath, FILE_EXT).replace(/-/g, " ");
-    console.log(`Opening: ${basename(dbPath)}`);
     startServer({ dbPath, canvasName, port: Number(opts.port), noOpen: !opts.open });
   });
 

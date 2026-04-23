@@ -15,9 +15,9 @@ AIと一緒に考えるマインドマップツール。ブラウザで直感的
 npm install
 npm run build -w packages/shared
 
-# 新しいセッションを作成して起動
+# セッションを作成または開く
 cd /your/project
-npx brain-map new "product brainstorm"
+npx brain-map product-brainstorm
 ```
 
 起動すると以下が表示される：
@@ -68,9 +68,7 @@ npx brain-map new "product brainstorm"
 ## CLI
 
 ```bash
-brain-map new <name>     # 新しいセッション作成 + 起動
-brain-map open [file]    # 既存ファイルを開く
-brain-map list           # カレントディレクトリの .brain-map ファイル一覧
+npx brain-map <file>     # 指定したファイルを開く（存在しない場合は新規作成）
 
 # オプション
 --port 3000              # ポート指定（デフォルト: 3000）
@@ -120,7 +118,7 @@ packages/
 │   ├── REST API   /api/*     GUIからの操作
 │   ├── SSE        /sse/canvas   AIの操作をGUIへリアルタイム配信
 │   └── MCP SSE    /mcp/sse   AI agentのエントリポイント
-├── frontend/      React + tldraw（devサーバー: ポート5173）
+├── frontend/      React + tldraw
 └── cli/           brain-map コマンド
 ```
 
@@ -150,7 +148,7 @@ npm run dev:frontend
 npm run typecheck
 ```
 
-フロントエンドの開発時は `http://localhost:5173` にアクセス（viteプロキシ経由でサーバーに繋がる）。
+フロントエンドの開発時も `http://localhost:3000` にアクセスすれば、サーバーからVite(5173)へ自動的にプロキシされます。
 
 ---
 

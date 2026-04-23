@@ -146,6 +146,15 @@ async function main() {
     app.get("*splat", (_req, res) => {
       res.sendFile(resolve(staticDir, "index.html"));
     });
+  } else if (process.env["VITE_PORT"]) {
+    const { createProxyMiddleware } = await import("http-proxy-middleware");
+    app.use(
+      createProxyMiddleware({
+        target: `http://localhost:${process.env["VITE_PORT"]}`,
+        changeOrigin: true,
+        ws: true,
+      })
+    );
   }
 
   app.listen(PORT, () => {
