@@ -132,6 +132,76 @@ function touchCanvas() {
   run("UPDATE canvases SET updated_at = ? WHERE id = ?", [new Date().toISOString(), CANVAS_ID]);
 }
 
+export function getCanvasSummary(): { name: string; nodeCount: number; edgeCount: number; groupCount: number; updatedAt: string } {
+  const canvas = queryOne("SELECT * FROM canvases WHERE id = ?", [CANVAS_ID])!;
+  const nodeCount = (queryOne("SELECT COUNT(*) as n FROM nodes WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number);
+  const edgeCount = (queryOne("SELECT COUNT(*) as n FROM edges WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number);
+  const groupCount = (queryOne("SELECT COUNT(*) as n FROM groups WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number);
+  return {
+    name: canvas["name"] as string,
+    nodeCount,
+    edgeCount,
+    groupCount,
+    updatedAt: canvas["updated_at"] as string,
+  };
+}
+
+export function listNodes(opts: { limit?: number; offset?: number; groupId?: string | null }): { nodes: CanvasNode[]; total: number } {
+  const { limit = 50, offset = 0, groupId } = opts;
+  let countSql = "SELECT COUNT(*) as n FROM nodes WHERE canvas_id = ?";
+  let listSql  = "SELECT * FROM nodes WHERE canvas_id = ?";
+  const params: (string | number | null)[] = [CANVAS_ID];
+
+  if (groupId !== undefined) {
+    countSql += " AND group_id IS ?";
+    listSql  += " AND group_id IS ?";
+    params.push(groupId);
+  }
+
+  listSql += " ORDER BY created_at ASC LIMIT ? OFFSET ?";
+  const countParams = [...params];
+  params.push(limit, offset);
+
+  const total = queryOne(countSql, countParams)!["n"] as number;
+  const nodes = queryAll(listSql, params).map(toNode);
+  return { nodes, total };
+}
+
+export function getNode(id: string): CanvasNode | null {
+  const row = queryOne("SELECT * FROM nodes WHERE id = ?", [id]);
+  return row ? toNode(row) : null;
+}
+
+export function searchNodes(query: string, limit = 20): CanvasNode[] {
+  // Case-insensitive substring match across node text
+  const pattern = `%${query.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+  return queryAll(
+    "SELECT * FROM nodes WHERE canvas_id = ? AND lower(text) LIKE lower(?) ESCAPE '\\' LIMIT ?",
+    [CANVAS_ID, pattern, limit]
+  ).map(toNode);
+}
+
+export function getNeighbors(nodeId: string): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  const edges = queryAll(
+    "SELECT * FROM edges WHERE canvas_id = ? AND (from_node_id = ? OR to_node_id = ?)",
+    [CANVAS_ID, nodeId, nodeId]
+  ).map(toEdge);
+
+  const neighborIds = new Set<string>();
+  for (const e of edges) {
+    if (e.fromNodeId !== nodeId) neighborIds.add(e.fromNodeId);
+    if (e.toNodeId !== nodeId) neighborIds.add(e.toNodeId);
+  }
+
+  const nodes: CanvasNode[] = [];
+  for (const id of neighborIds) {
+    const row = queryOne("SELECT * FROM nodes WHERE id = ?", [id]);
+    if (row) nodes.push(toNode(row));
+  }
+
+  return { nodes, edges };
+}
+
 export function getCanvasState(): CanvasState {
   const canvas = queryOne("SELECT * FROM canvases WHERE id = ?", [CANVAS_ID])!;
   const nodes = queryAll("SELECT * FROM nodes WHERE canvas_id = ?", [CANVAS_ID]).map(toNode);

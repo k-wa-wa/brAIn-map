@@ -14,6 +14,8 @@ import {
 import { z } from "zod";
 import {
   getCanvasState,
+  getCanvasSummary,
+  listNodes,
   addNode,
   updateNode,
   deleteNode,
@@ -21,6 +23,9 @@ import {
   deleteEdge,
   groupNodes,
   deleteGroup,
+  getNode,
+  searchNodes,
+  getNeighbors,
 } from "./db.js";
 import { broadcast } from "./sse.js";
 
@@ -35,9 +40,41 @@ function randomPosition() {
 export function registerTools(server: McpServer) {
   server.registerTool(
     "get_canvas_state",
-    { description: "Get the full current state of the canvas" },
+    {
+      description: "Get the FULL state of the canvas including all nodes, edges, and groups. WARNING: returns all data without pagination — only use on small canvases or when you specifically need everything. Prefer get_canvas_summary + list_nodes for large canvases.",
+    },
     async () => {
       return ok(getCanvasState());
+    }
+  );
+
+  server.registerTool(
+    "get_canvas_summary",
+    {
+      description: "Get a lightweight summary of the canvas: name, node/edge/group counts, and last updated time. Always call this first to understand the canvas scale before deciding which tools to use next.",
+    },
+    async () => {
+      return ok(getCanvasSummary());
+    }
+  );
+
+  server.registerTool(
+    "list_nodes",
+    {
+      description: "List nodes with pagination. Use limit/offset to page through large canvases. Optionally filter by groupId (pass null to get ungrouped nodes).",
+      inputSchema: {
+        limit: z.number().int().min(1).max(200).optional().describe("Max nodes to return (default 50)"),
+        offset: z.number().int().min(0).optional().describe("Pagination offset (default 0)"),
+        groupId: z.string().uuid().nullable().optional().describe("Filter by group ID; null = ungrouped only"),
+      },
+    },
+    async (input) => {
+      const result = listNodes({
+        ...(input.limit !== undefined && { limit: input.limit }),
+        ...(input.offset !== undefined && { offset: input.offset }),
+        ...(input.groupId !== undefined && { groupId: input.groupId }),
+      });
+      return ok({ total: result.total, count: result.nodes.length, nodes: result.nodes });
     }
   );
 
@@ -168,6 +205,48 @@ export function registerTools(server: McpServer) {
       if (!deleted) return ok({ success: false, error: "Group not found" });
       broadcast({ type: "group:deleted", payload: { id: parsed.id } });
       return ok({ success: true });
+    }
+  );
+
+  server.registerTool(
+    "get_node",
+    {
+      description: "Get a single node by its ID",
+      inputSchema: { id: z.string().uuid().describe("Node ID") },
+    },
+    async (input) => {
+      const node = getNode(input.id);
+      if (!node) return ok({ success: false, error: "Node not found" });
+      return ok(node);
+    }
+  );
+
+  server.registerTool(
+    "search_nodes",
+    {
+      description: "Search nodes by text content (case-insensitive substring match). Use this to find specific topics, keywords, or concepts on the canvas before creating new nodes to avoid duplicates.",
+      inputSchema: {
+        query: z.string().min(1).describe("Search query string"),
+        limit: z.number().int().min(1).max(100).optional().describe("Max results to return (default 20)"),
+      },
+    },
+    async (input) => {
+      const results = searchNodes(input.query, input.limit ?? 20);
+      return ok({ count: results.length, nodes: results });
+    }
+  );
+
+  server.registerTool(
+    "get_neighbors",
+    {
+      description: "Get all nodes and edges directly connected to a given node. Useful for exploring local context around a concept.",
+      inputSchema: { nodeId: z.string().uuid().describe("The node to explore from") },
+    },
+    async (input) => {
+      const nodeExists = getNode(input.nodeId);
+      if (!nodeExists) return ok({ success: false, error: "Node not found" });
+      const result = getNeighbors(input.nodeId);
+      return ok(result);
     }
   );
 }
