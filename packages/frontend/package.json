@@ -1,0 +1,27 @@
+{
+  "name": "@brain-map/frontend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@brain-map/shared": "*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tldraw": "^3.9.0",
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.3"
+  }
+}
