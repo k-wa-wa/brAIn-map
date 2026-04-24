@@ -6,26 +6,26 @@ import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline/promises";
 
-import type { Story } from "./lib/types.js";
-import { ApiClient } from "./lib/api.js";
-import { startServer } from "./lib/server.js";
+import type { Story } from "../lib/types.js";
+import { ApiClient } from "../lib/api.js";
+import { startServer } from "../lib/server.js";
 import {
   section,
   printCanvasState,
   printToolStats,
   printEfficiencyWarnings,
   printChecklist,
-} from "./lib/display.js";
+} from "../lib/display.js";
 
 // ── story registry ─────────────────────────────────────────────────────────────
 async function loadStory(id: string): Promise<Story> {
   const prefix = id.replace(/^(\d+).*/, "$1");
   const loaders: Record<string, () => Promise<{ story: Story }>> = {
-    "01": () => import("./stories/01-basic-mapping.js"),
-    "02": () => import("./stories/02-graph-building.js"),
-    "03": () => import("./stories/03-group-organize.js"),
-    "04": () => import("./stories/04-search-update.js"),
-    "05": () => import("./stories/05-full-cycle.js"),
+    "01": () => import("./data/01-basic-mapping.js"),
+    "02": () => import("./data/02-graph-building.js"),
+    "03": () => import("./data/03-group-organize.js"),
+    "04": () => import("./data/04-search-update.js"),
+    "05": () => import("./data/05-full-cycle.js"),
   };
 
   const loader = loaders[prefix];

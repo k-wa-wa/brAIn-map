@@ -10,9 +10,10 @@
     "build": "npm run build -w packages/shared && npm run build -w packages/mcp-server && npm run build -w packages/frontend",
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/mcp-server && npm run typecheck -w packages/frontend && npm run typecheck -w packages/cli && tsc -p tests/tsconfig.json",
     "clean": "npm run clean --workspaces --if-present",
-    "story": "tsx tests/runner.ts"
+    "story": "tsx tests/stories/runner.ts",
+    "test:mcp": "tsx tests/mcp/runner.ts"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "typescript": "^6.0.3"
   }
 }

@@ -120,7 +120,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           serverOriginatedIds.current.delete(shape.id);
           return;
         }
-        const text = getTextFromProps(shape.props as Record<string, unknown>, editor);
+        const text = getTextFromProps(shape.props as any, editor);
         api
           .addNode({ type: "sticky", text, position: { x: shape.x, y: shape.y } })
           .catch(console.error);
@@ -133,7 +133,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           serverOriginatedIds.current.delete(next.id);
           return;
         }
-        const text = getTextFromProps(next.props as Record<string, unknown>, editor);
+        const text = getTextFromProps(next.props as any, editor);
         api
           .updateNode({ id: brainMapId, text, position: { x: next.x, y: next.y } })
           .catch(console.error);

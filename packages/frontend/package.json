@@ -14,14 +14,14 @@
     "@brain-map/shared": "*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tldraw": "^3.9.0",
-    "zod": "^3.24.3"
+    "tldraw": "^4.5.10",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
-    "@vitejs/plugin-react": "^4.4.1",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.3"
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
   }
 }

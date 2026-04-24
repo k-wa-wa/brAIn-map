@@ -1,5 +1,5 @@
-import type { Story } from "../lib/types.js";
-import type { ApiClient } from "../lib/api.js";
+import type { Story } from "../../lib/types.js";
+import type { ApiClient } from "../../lib/api.js";
 
 async function seed(api: ApiClient): Promise<void> {
   const nodes = [
