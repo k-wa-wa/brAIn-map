@@ -88,6 +88,20 @@ interface Props {
   lastEvent: SseEvent | null;
 }
 
+const clientId = localStorage.getItem("brain-map-client-id") || (() => {
+  const id = Math.random().toString(36).substring(2, 10);
+  localStorage.setItem("brain-map-client-id", id);
+  return id;
+})();
+
+const tabId = sessionStorage.getItem("brain-map-tab-id") || (() => {
+  const id = Math.random().toString(36).substring(2, 10);
+  sessionStorage.setItem("brain-map-tab-id", id);
+  return id;
+})();
+
+const sessionId = `${clientId}:${tabId}`;
+
 export function CanvasView({ canvas, lastEvent }: Props) {
   const editorRef = useRef<Editor | null>(null);
   // Tracks shape IDs of operations originated from the server so side-effect handlers skip them
@@ -122,6 +136,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
       if (!brainMapEdgeId) {
         // New connection
         api.connectNodes({
+          id: arrow.id.replace(/^shape:/, ""),
           fromNodeId: startNodeId,
           toNodeId: endNodeId,
           label: (arrow.props as any).text || ""
@@ -172,6 +187,22 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         editor.createBindings(bindings);
       }
 
+      // Restore camera
+      api.getCamera(sessionId).then(camera => {
+        if (camera) {
+          editor.setCamera({ x: camera.x, y: camera.y, z: camera.zoom });
+        }
+      }).catch(console.error);
+
+      // Save camera on change
+      const unlisten = editor.store.listen((entry) => {
+        // Only trigger if camera actually moved (simplified check)
+        const camera = editor.getCamera();
+        debounce("camera", () => {
+          api.updateCamera(sessionId, { x: camera.x, y: camera.y, zoom: camera.z }).catch(console.error);
+        }, 1000);
+      }, { scope: "local", source: "user" } as any);
+
       // --- Node Handlers ---
       editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {
         if (shape.type !== "note") return;
@@ -182,12 +213,18 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         const text = getTextFromProps(shape.props as any, editor);
         const color = REVERSE_COLOR_MAP[(shape.props as any).color] ?? "yellow";
         api
-          .addNode({ type: "sticky", text, color, position: { x: shape.x, y: shape.y } })
-          .then(node => {
+          .addNode({
+            id: shape.id.replace(/^shape:/, ""),
+            type: "sticky",
+            text,
+            color,
+            position: { x: shape.x, y: shape.y },
+          })
+          .then((node) => {
             serverOriginatedIds.current.add(shape.id);
             editor.updateShape({
               id: shape.id,
-              meta: { brainMapId: node.id }
+              meta: { brainMapId: node.id },
             } as any);
           })
           .catch(console.error);
@@ -251,6 +288,10 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         if (binding.type !== "arrow") return;
         syncArrowBindings(editor, binding.fromId);
       });
+
+      return () => {
+        unlisten();
+      };
     },
     [canvas, syncArrowBindings]
   );

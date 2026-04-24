@@ -15,6 +15,8 @@ import {
   deleteEdge,
   groupNodes,
   deleteGroup,
+  setCamera,
+  getCamera,
 } from "./db.js";
 import { addSseClient, broadcast } from "./sse.js";
 import { registerTools, getToolStats, resetToolStats } from "./tools.js";
@@ -24,6 +26,7 @@ import {
   DeleteGroupInputSchema,
   ConnectNodesInputSchema,
   GroupNodesInputSchema,
+  CameraStateSchema,
 } from "@brain-map/shared";
 
 const PORT = process.env["PORT"] ? Number(process.env["PORT"]) : 3000;
@@ -61,7 +64,7 @@ async function main() {
       type: parsed.data.type ?? "sticky",
       color: parsed.data.color ?? "yellow",
       position: parsed.data.position ?? { x: Math.random() * 800, y: Math.random() * 600 },
-    });
+    } as any);
     broadcast({ type: "node:added", payload: node });
     res.status(201).json(node);
   });
@@ -87,7 +90,7 @@ async function main() {
   app.post("/api/edges", (req, res) => {
     const parsed = ConnectNodesInputSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-    const edge = connectNodes(parsed.data);
+    const edge = connectNodes(parsed.data as any);
     broadcast({ type: "edge:added", payload: edge });
     res.status(201).json(edge);
   });
@@ -108,6 +111,23 @@ async function main() {
     if (!edge) { res.status(404).json({ error: "Edge not found" }); return; }
     broadcast({ type: "edge:updated", payload: edge });
     res.json(edge);
+  });
+  
+  app.get("/api/camera/:sessionId", (req, res) => {
+    const sessionId = req.params["sessionId"];
+    if (!sessionId) { res.status(400).json({ error: "Missing sessionId" }); return; }
+    const camera = getCamera(sessionId);
+    if (!camera) { res.status(404).json({ error: "Camera not found" }); return; }
+    res.json(camera);
+  });
+
+  app.put("/api/camera/:sessionId", (req, res) => {
+    const sessionId = req.params["sessionId"];
+    if (!sessionId) { res.status(400).json({ error: "Missing sessionId" }); return; }
+    const parsed = CameraStateSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+    setCamera(sessionId, parsed.data);
+    res.status(204).send();
   });
 
   app.post("/api/groups", (req, res) => {

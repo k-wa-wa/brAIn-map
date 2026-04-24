@@ -4,49 +4,51 @@ import { NodeColorSchema, NodeTypeSchema, PositionSchema } from "./canvas.js";
 // --- Inputs ---
 
 export const AddNodeInputSchema = z.object({
-  text: z.string().min(1),
+  id: z.string().optional(),
+  text: z.string(),
   type: NodeTypeSchema.default("sticky"),
   color: NodeColorSchema.optional(),
   position: PositionSchema.optional(),
-  groupId: z.string().uuid().optional(),
+  groupId: z.string().optional(),
 });
 export type AddNodeInput = z.infer<typeof AddNodeInputSchema>;
 
 export const UpdateNodeInputSchema = z.object({
-  id: z.string().uuid(),
-  text: z.string().min(1).optional(),
+  id: z.string(),
+  text: z.string().optional(),
   color: NodeColorSchema.optional(),
   position: PositionSchema.optional(),
-  groupId: z.string().uuid().nullable().optional(),
+  groupId: z.string().nullable().optional(),
 });
 export type UpdateNodeInput = z.infer<typeof UpdateNodeInputSchema>;
 
 export const DeleteNodeInputSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string(),
 });
 export type DeleteNodeInput = z.infer<typeof DeleteNodeInputSchema>;
 
 export const ConnectNodesInputSchema = z.object({
-  fromNodeId: z.string().uuid(),
-  toNodeId: z.string().uuid(),
+  id: z.string().optional(),
+  fromNodeId: z.string(),
+  toNodeId: z.string(),
   label: z.string().optional(),
 });
 export type ConnectNodesInput = z.infer<typeof ConnectNodesInputSchema>;
 
 export const DeleteEdgeInputSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string(),
 });
 export type DeleteEdgeInput = z.infer<typeof DeleteEdgeInputSchema>;
 
 export const GroupNodesInputSchema = z.object({
-  nodeIds: z.array(z.string().uuid()).min(1),
+  nodeIds: z.array(z.string()).min(1),
   groupName: z.string().min(1),
   color: NodeColorSchema.optional(),
 });
 export type GroupNodesInput = z.infer<typeof GroupNodesInputSchema>;
 
 export const DeleteGroupInputSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string(),
   deleteNodes: z.boolean().default(false),
 });
 export type DeleteGroupInput = z.infer<typeof DeleteGroupInputSchema>;

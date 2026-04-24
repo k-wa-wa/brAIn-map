@@ -129,7 +129,7 @@ export function registerTools(server: McpServer) {
         type: parsed.type ?? "sticky",
         color: parsed.color ?? "yellow",
         position: parsed.position ?? randomPosition(),
-      });
+      } as any);
       broadcast({ type: "node:added", payload: node });
       return ok(node);
     }
@@ -183,7 +183,7 @@ export function registerTools(server: McpServer) {
     },
     async (input) => {
       const parsed = ConnectNodesInputSchema.parse(input);
-      const edge = connectNodes(parsed);
+      const edge = connectNodes(parsed as any);
       broadcast({ type: "edge:added", payload: edge });
       return ok(edge);
     }

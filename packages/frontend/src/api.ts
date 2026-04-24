@@ -6,6 +6,7 @@ import type {
   AddNodeInput,
   UpdateNodeInput,
   ConnectNodesInput,
+  CameraState,
 } from "@brain-map/shared";
 
 const BASE = "/api";
@@ -34,4 +35,6 @@ export const api = {
     req<CanvasGroup>("POST", "/groups", input),
   deleteGroup: (id: string, deleteNodes = false) =>
     req<void>("DELETE", `/groups/${id}?deleteNodes=${deleteNodes}`),
+  getCamera: (sessionId: string) => req<CameraState>("GET", `/camera/${sessionId}`),
+  updateCamera: (sessionId: string, camera: CameraState) => req<void>("PUT", `/camera/${sessionId}`, camera),
 };

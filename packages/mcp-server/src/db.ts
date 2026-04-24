@@ -58,6 +58,14 @@ export async function createDb(path: string, canvasName = "My Canvas"): Promise<
       label TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      x REAL NOT NULL,
+      y REAL NOT NULL,
+      zoom REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   const exists = _db.exec("SELECT id FROM canvases WHERE id = ?", [CANVAS_ID]);
@@ -218,6 +226,7 @@ export function getCanvasState(): CanvasState {
 }
 
 export function addNode(input: {
+  id?: string | undefined;
   text: string;
   type: CanvasNode["type"];
   color: CanvasNode["color"];
@@ -225,7 +234,7 @@ export function addNode(input: {
   groupId?: string | undefined;
 }): CanvasNode {
   const now = new Date().toISOString();
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   run(
     `INSERT INTO nodes (id, canvas_id, type, text, x, y, width, height, color, group_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 200, 200, ?, ?, ?, ?)`,
@@ -266,9 +275,9 @@ export function deleteNode(id: string): boolean {
   return true;
 }
 
-export function connectNodes(input: { fromNodeId: string; toNodeId: string; label?: string | undefined }): CanvasEdge {
+export function connectNodes(input: { id?: string; fromNodeId: string; toNodeId: string; label?: string | undefined }): CanvasEdge {
   const now = new Date().toISOString();
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   run("INSERT INTO edges (id, canvas_id, from_node_id, to_node_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
     id, CANVAS_ID, input.fromNodeId, input.toNodeId, input.label ?? null, now,
   ]);
@@ -458,4 +467,40 @@ export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
   }
 
   return updated;
+}
+export function setCamera(sessionId: string, camera: { x: number; y: number; zoom: number }): void {
+  const now = new Date().toISOString();
+  const existing = queryOne("SELECT id FROM sessions WHERE id = ?", [sessionId]);
+  if (existing) {
+    run("UPDATE sessions SET x = ?, y = ?, zoom = ?, updated_at = ? WHERE id = ?", [
+      camera.x, camera.y, camera.zoom, now, sessionId
+    ]);
+  } else {
+    run("INSERT INTO sessions (id, canvas_id, x, y, zoom, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [
+      sessionId, CANVAS_ID, camera.x, camera.y, camera.zoom, now
+    ]);
+  }
+}
+
+export function getCamera(sessionId: string): { x: number; y: number; zoom: number } | null {
+  // Try exact session first
+  let row = queryOne("SELECT x, y, zoom FROM sessions WHERE id = ?", [sessionId]);
+  if (row) return {
+    x: row["x"] as number,
+    y: row["y"] as number,
+    zoom: row["zoom"] as number,
+  };
+
+  // Fallback to most recent session for the same client (browser)
+  const clientId = sessionId.split(":")[0];
+  if (clientId) {
+    row = queryOne("SELECT x, y, zoom FROM sessions WHERE id LIKE ? ORDER BY updated_at DESC LIMIT 1", [`${clientId}:%`]);
+    if (row) return {
+      x: row["x"] as number,
+      y: row["y"] as number,
+      zoom: row["zoom"] as number,
+    };
+  }
+  
+  return null;
 }
