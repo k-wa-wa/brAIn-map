@@ -313,3 +313,140 @@ export function deleteGroup(id: string, deleteNodes: boolean): boolean {
   touchCanvas();
   return true;
 }
+
+export function updateGroup(input: { id: string; name?: string; color?: CanvasGroup["color"] }): CanvasGroup | null {
+  const existing = queryOne("SELECT * FROM groups WHERE id = ?", [input.id]);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  const name = input.name ?? (existing["name"] as string);
+  const color = input.color ?? (existing["color"] as string);
+  run("UPDATE groups SET name = ?, color = ?, updated_at = ? WHERE id = ?", [name, color, now, input.id]);
+  touchCanvas();
+  return toGroup(queryOne("SELECT * FROM groups WHERE id = ?", [input.id])!);
+}
+
+export function listEdges(opts: { limit?: number; offset?: number }): { edges: CanvasEdge[]; total: number } {
+  const { limit = 50, offset = 0 } = opts;
+  const total = queryOne("SELECT COUNT(*) as n FROM edges WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number;
+  const edges = queryAll(
+    "SELECT * FROM edges WHERE canvas_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+    [CANVAS_ID, limit, offset]
+  ).map(toEdge);
+  return { edges, total };
+}
+
+export function getGraphStats() {
+  const nodeCount = queryOne("SELECT COUNT(*) as n FROM nodes WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number;
+  const edgeCount = queryOne("SELECT COUNT(*) as n FROM edges WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number;
+  const groupCount = queryOne("SELECT COUNT(*) as n FROM groups WHERE canvas_id = ?", [CANVAS_ID])!["n"] as number;
+
+  const nodesWithDegree = queryAll(
+    `SELECT n.id, n.text,
+       (SELECT COUNT(*) FROM edges WHERE canvas_id = ? AND (from_node_id = n.id OR to_node_id = n.id)) as degree
+     FROM nodes n WHERE n.canvas_id = ?
+     ORDER BY degree DESC`,
+    [CANVAS_ID, CANVAS_ID]
+  );
+
+  const isolatedNodeCount = nodesWithDegree.filter((r) => (r["degree"] as number) === 0).length;
+  const topConnectedNodes = nodesWithDegree.slice(0, 10).map((r) => ({
+    id: r["id"] as string,
+    text: (r["text"] as string).substring(0, 60),
+    degree: r["degree"] as number,
+  }));
+
+  return { nodeCount, edgeCount, groupCount, isolatedNodeCount, topConnectedNodes };
+}
+
+export function clearCanvas(): CanvasState {
+  run("DELETE FROM edges WHERE canvas_id = ?", [CANVAS_ID]);
+  run("DELETE FROM nodes WHERE canvas_id = ?", [CANVAS_ID]);
+  run("DELETE FROM groups WHERE canvas_id = ?", [CANVAS_ID]);
+  touchCanvas();
+  return getCanvasState();
+}
+
+export function listGroups(): CanvasGroup[] {
+  return queryAll(
+    "SELECT * FROM groups WHERE canvas_id = ? ORDER BY created_at ASC",
+    [CANVAS_ID]
+  ).map(toGroup);
+}
+
+export function bulkConnectNodes(
+  edges: Array<{ fromNodeId: string; toNodeId: string; label?: string }>
+): CanvasEdge[] {
+  return edges.map((e) => connectNodes(e));
+}
+
+export function moveNodesToGroup(
+  groupId: string | null,
+  nodeIds: string[]
+): CanvasNode[] {
+  const now = new Date().toISOString();
+  const updated: CanvasNode[] = [];
+  for (const id of nodeIds) {
+    run(
+      "UPDATE nodes SET group_id = ?, updated_at = ? WHERE id = ? AND canvas_id = ?",
+      [groupId, now, id, CANVAS_ID]
+    );
+    const node = getNode(id);
+    if (node) updated.push(node);
+  }
+  if (updated.length > 0) touchCanvas();
+  return updated;
+}
+
+export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
+  const nodes = queryAll(
+    "SELECT * FROM nodes WHERE canvas_id = ? ORDER BY created_at ASC",
+    [CANVAS_ID]
+  ).map(toNode);
+  if (nodes.length === 0) return [];
+
+  const COL_W = 260;
+  const ROW_H = 260;
+  const PAD = 100;
+  const CLUSTER_GAP = 500;
+  const updated: CanvasNode[] = [];
+
+  if (strategy === "grid") {
+    const cols = Math.ceil(Math.sqrt(nodes.length));
+    for (const [i, node] of nodes.entries()) {
+      const x = PAD + (i % cols) * COL_W;
+      const y = PAD + Math.floor(i / cols) * ROW_H;
+      const result = updateNode({ id: node.id, position: { x, y } });
+      if (result) updated.push(result);
+    }
+  } else {
+    // cluster: nodes in the same group are placed together
+    const buckets = new Map<string | null, CanvasNode[]>();
+    for (const node of nodes) {
+      const key = node.groupId ?? null;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(node);
+    }
+
+    // ungrouped first, then each named group
+    const sections: CanvasNode[][] = [];
+    const ungrouped = buckets.get(null);
+    if (ungrouped && ungrouped.length > 0) sections.push(ungrouped);
+    for (const [key, members] of buckets) {
+      if (key !== null) sections.push(members);
+    }
+
+    let startX = PAD;
+    for (const section of sections) {
+      const cols = Math.ceil(Math.sqrt(section.length));
+      for (const [i, node] of section.entries()) {
+        const x = startX + (i % cols) * COL_W;
+        const y = PAD + Math.floor(i / cols) * ROW_H;
+        const result = updateNode({ id: node.id, position: { x, y } });
+        if (result) updated.push(result);
+      }
+      startX += cols * COL_W + CLUSTER_GAP;
+    }
+  }
+
+  return updated;
+}

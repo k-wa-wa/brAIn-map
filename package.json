@@ -8,8 +8,9 @@
     "dev:server": "npm run dev -w packages/mcp-server",
     "dev:frontend": "npm run dev -w packages/frontend",
     "build": "npm run build -w packages/shared && npm run build -w packages/mcp-server && npm run build -w packages/frontend",
-    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/mcp-server && npm run typecheck -w packages/frontend && npm run typecheck -w packages/cli",
-    "clean": "npm run clean --workspaces --if-present"
+    "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/mcp-server && npm run typecheck -w packages/frontend && npm run typecheck -w packages/cli && tsc -p tests/tsconfig.json",
+    "clean": "npm run clean --workspaces --if-present",
+    "story": "tsx tests/runner.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

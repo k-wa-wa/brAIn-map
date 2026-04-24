@@ -2,7 +2,7 @@ import { useCanvasStore } from "./useCanvasStore.js";
 import { CanvasView } from "./CanvasView.js";
 
 export function App() {
-  const { canvas } = useCanvasStore();
+  const { canvas, lastEvent } = useCanvasStore();
 
   if (!canvas) {
     return (
@@ -23,5 +23,5 @@ export function App() {
     );
   }
 
-  return <CanvasView canvas={canvas} />;
+  return <CanvasView canvas={canvas} lastEvent={lastEvent} />;
 }

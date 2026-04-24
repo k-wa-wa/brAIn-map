@@ -23,11 +23,33 @@ import {
   deleteEdge,
   groupNodes,
   deleteGroup,
+  updateGroup,
+  listEdges,
+  listGroups,
+  getGraphStats,
+  clearCanvas,
   getNode,
   searchNodes,
   getNeighbors,
+  bulkConnectNodes,
+  moveNodesToGroup,
+  layoutCanvas,
 } from "./db.js";
 import { broadcast } from "./sse.js";
+
+const _toolCounts = new Map<string, number>();
+
+export function getToolStats(): Record<string, number> {
+  return Object.fromEntries(_toolCounts);
+}
+
+export function resetToolStats(): void {
+  _toolCounts.clear();
+}
+
+function track(name: string) {
+  _toolCounts.set(name, (_toolCounts.get(name) ?? 0) + 1);
+}
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -38,7 +60,16 @@ function randomPosition() {
 }
 
 export function registerTools(server: McpServer) {
-  server.registerTool(
+  // Wraps registerTool to automatically count each tool invocation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function reg(name: string, config: any, handler: (input: any) => Promise<any>) {
+    server.registerTool(name, config, async (input) => {
+      track(name);
+      return handler(input);
+    });
+  }
+
+  reg(
     "get_canvas_state",
     {
       description: "Get the FULL state of the canvas including all nodes, edges, and groups. WARNING: returns all data without pagination — only use on small canvases or when you specifically need everything. Prefer get_canvas_summary + list_nodes for large canvases.",
@@ -48,7 +79,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "get_canvas_summary",
     {
       description: "Get a lightweight summary of the canvas: name, node/edge/group counts, and last updated time. Always call this first to understand the canvas scale before deciding which tools to use next.",
@@ -58,7 +89,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "list_nodes",
     {
       description: "List nodes with pagination. Use limit/offset to page through large canvases. Optionally filter by groupId (pass null to get ungrouped nodes).",
@@ -78,7 +109,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "add_node",
     {
       description: "Add a new sticky note or text node to the canvas",
@@ -103,7 +134,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "update_node",
     {
       description: "Update text, color, position, or group of an existing node",
@@ -124,7 +155,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "delete_node",
     {
       description: "Delete a node and its connected edges",
@@ -139,7 +170,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "connect_nodes",
     {
       description: "Create a directional edge between two nodes",
@@ -157,7 +188,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "delete_edge",
     {
       description: "Remove a connection between nodes",
@@ -172,12 +203,12 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "group_nodes",
     {
-      description: "Cluster multiple nodes into a named group",
+      description: "Create a new named group and place the given nodes into it. To add nodes to an EXISTING group later, use move_nodes_to_group instead.",
       inputSchema: {
-        nodeIds: z.array(z.string().uuid()).min(2),
+        nodeIds: z.array(z.string().uuid()).min(1),
         groupName: z.string().min(1),
         color: NodeColorSchema.optional(),
       }
@@ -190,7 +221,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "delete_group",
     {
       description: "Delete a group (optionally delete its nodes too)",
@@ -208,7 +239,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "get_node",
     {
       description: "Get a single node by its ID",
@@ -221,7 +252,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "search_nodes",
     {
       description: "Search nodes by text content (case-insensitive substring match). Use this to find specific topics, keywords, or concepts on the canvas before creating new nodes to avoid duplicates.",
@@ -236,7 +267,7 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  server.registerTool(
+  reg(
     "get_neighbors",
     {
       description: "Get all nodes and edges directly connected to a given node. Useful for exploring local context around a concept.",
@@ -247,6 +278,176 @@ export function registerTools(server: McpServer) {
       if (!nodeExists) return ok({ success: false, error: "Node not found" });
       const result = getNeighbors(input.nodeId);
       return ok(result);
+    }
+  );
+
+  reg(
+    "update_group",
+    {
+      description: "Rename or recolor an existing group",
+      inputSchema: {
+        id: z.string().uuid().describe("Group ID"),
+        name: z.string().min(1).optional(),
+        color: NodeColorSchema.optional(),
+      },
+    },
+    async (input) => {
+      const group = updateGroup({
+        id: input.id,
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.color !== undefined && { color: input.color }),
+      });
+      if (!group) return ok({ success: false, error: "Group not found" });
+      broadcast({ type: "group:updated", payload: group });
+      return ok(group);
+    }
+  );
+
+  reg(
+    "list_edges",
+    {
+      description: "List all edges on the canvas with pagination. Use this to understand the connections between nodes.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(200).optional().describe("Max edges to return (default 50)"),
+        offset: z.number().int().min(0).optional().describe("Pagination offset (default 0)"),
+      },
+    },
+    async (input) => {
+      const result = listEdges({
+        ...(input.limit !== undefined && { limit: input.limit }),
+        ...(input.offset !== undefined && { offset: input.offset }),
+      });
+      return ok({ total: result.total, count: result.edges.length, edges: result.edges });
+    }
+  );
+
+  reg(
+    "get_graph_stats",
+    {
+      description: "Get statistics about the knowledge graph: node/edge/group counts, isolated nodes, and the top 10 most connected nodes. Use this to understand the overall shape and density of the brain map.",
+    },
+    async () => {
+      return ok(getGraphStats());
+    }
+  );
+
+  reg(
+    "bulk_add_nodes",
+    {
+      description: "Add multiple nodes to the canvas in one call. Nodes are auto-positioned in a grid if no position is given. Use this to quickly populate the canvas with many ideas.",
+      inputSchema: {
+        nodes: z.array(
+          z.object({
+            text: z.string().min(1),
+            type: NodeTypeSchema.optional(),
+            color: NodeColorSchema.optional(),
+            position: PositionSchema.optional(),
+            groupId: z.string().uuid().optional(),
+          })
+        ).min(1).max(50).describe("List of nodes to create (max 50)"),
+      },
+    },
+    async (input) => {
+      const cols = Math.ceil(Math.sqrt(input.nodes.length));
+      type NodeInput = { text: string; type?: "sticky" | "text" | "shape"; color?: "yellow"|"blue"|"green"|"red"|"purple"|"orange"|"pink"|"gray"; position?: { x: number; y: number }; groupId?: string };
+      const created = (input.nodes as NodeInput[]).map((n, i) => {
+        const position = n.position ?? {
+          x: (i % cols) * 220 + 80,
+          y: Math.floor(i / cols) * 220 + 80,
+        };
+        const node = addNode({
+          text: n.text,
+          type: n.type ?? "sticky",
+          color: n.color ?? "yellow",
+          position,
+          ...(n.groupId && { groupId: n.groupId }),
+        });
+        broadcast({ type: "node:added", payload: node });
+        return node;
+      });
+      return ok({ count: created.length, nodes: created });
+    }
+  );
+
+  reg(
+    "layout_canvas",
+    {
+      description: `Rearrange all nodes into a clean layout and update their positions on the canvas.
+- "grid": places all nodes in a square grid. Best when nodes have no groups or you want a clean slate.
+- "cluster": places nodes in group-based clusters side by side. Ungrouped nodes come first, then each named group. Use this after grouping to make the visual structure match the logical structure.
+Call this after bulk_add_nodes or move_nodes_to_group to tidy up the canvas.`,
+      inputSchema: {
+        strategy: z.enum(["grid", "cluster"]).describe('"grid" = flat square grid | "cluster" = grouped side by side'),
+      },
+    },
+    async (input) => {
+      const updated = layoutCanvas(input.strategy);
+      for (const node of updated) broadcast({ type: "node:updated", payload: node });
+      return ok({ count: updated.length, message: `Repositioned ${updated.length} nodes with strategy "${input.strategy}"` });
+    }
+  );
+
+  reg(
+    "clear_canvas",
+    {
+      description: "Delete ALL nodes, edges, and groups from the canvas. This is irreversible. Use only when explicitly asked to start fresh.",
+    },
+    async () => {
+      const state = clearCanvas();
+      broadcast({ type: "canvas:reset", payload: state });
+      return ok({ success: true });
+    }
+  );
+
+  reg(
+    "list_groups",
+    {
+      description: "List all groups on the canvas with their IDs, names, and colors. Always call this before assigning nodes to groups so you know which groups exist.",
+    },
+    async () => {
+      const groups = listGroups();
+      return ok({ count: groups.length, groups });
+    }
+  );
+
+  reg(
+    "bulk_connect_nodes",
+    {
+      description: "Create multiple directional edges in one call. Use this after bulk_add_nodes to wire up a whole graph without making one connect_nodes call per edge.",
+      inputSchema: {
+        edges: z.array(
+          z.object({
+            fromNodeId: z.string().uuid(),
+            toNodeId: z.string().uuid(),
+            label: z.string().optional(),
+          })
+        ).min(1).max(100).describe("List of edges to create (max 100)"),
+      },
+    },
+    async (input) => {
+      const created = bulkConnectNodes(input.edges.map((e: { fromNodeId: string; toNodeId: string; label?: string }) => ({
+        fromNodeId: e.fromNodeId,
+        toNodeId: e.toNodeId,
+        ...(e.label !== undefined && { label: e.label }),
+      })));
+      for (const edge of created) broadcast({ type: "edge:added", payload: edge });
+      return ok({ count: created.length, edges: created });
+    }
+  );
+
+  reg(
+    "move_nodes_to_group",
+    {
+      description: "Move multiple existing nodes into a group (or ungroup them). Use this to reorganize nodes without recreating them. Pass groupId=null to remove nodes from their current group.",
+      inputSchema: {
+        groupId: z.string().uuid().nullable().describe("Target group ID, or null to ungroup"),
+        nodeIds: z.array(z.string().uuid()).min(1).max(100),
+      },
+    },
+    async (input) => {
+      const updated = moveNodesToGroup(input.groupId, input.nodeIds);
+      for (const node of updated) broadcast({ type: "node:updated", payload: node });
+      return ok({ count: updated.length, nodes: updated });
     }
   );
 }

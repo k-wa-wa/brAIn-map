@@ -39,7 +39,7 @@ export const DeleteEdgeInputSchema = z.object({
 export type DeleteEdgeInput = z.infer<typeof DeleteEdgeInputSchema>;
 
 export const GroupNodesInputSchema = z.object({
-  nodeIds: z.array(z.string().uuid()).min(2),
+  nodeIds: z.array(z.string().uuid()).min(1),
   groupName: z.string().min(1),
   color: NodeColorSchema.optional(),
 });

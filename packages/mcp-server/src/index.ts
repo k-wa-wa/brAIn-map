@@ -16,7 +16,7 @@ import {
   deleteGroup,
 } from "./db.js";
 import { addSseClient, broadcast } from "./sse.js";
-import { registerTools } from "./tools.js";
+import { registerTools, getToolStats, resetToolStats } from "./tools.js";
 import {
   AddNodeInputSchema,
   UpdateNodeInputSchema,
@@ -117,6 +117,16 @@ async function main() {
     const deleted = deleteGroup(parsed.data.id, parsed.data.deleteNodes);
     if (!deleted) { res.status(404).json({ error: "Group not found" }); return; }
     broadcast({ type: "group:deleted", payload: { id: parsed.data.id } });
+    res.status(204).send();
+  });
+
+  // --- Tool call stats (for testing) ---
+  app.get("/api/tool-stats", (_req, res) => {
+    res.json(getToolStats());
+  });
+
+  app.post("/api/tool-stats/reset", (_req, res) => {
+    resetToolStats();
     res.status(204).send();
   });
 

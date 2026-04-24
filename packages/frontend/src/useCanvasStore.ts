@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import type { CanvasState, SseEvent } from "@brain-map/shared";
 import { SseEventSchema } from "@brain-map/shared";
 import { api } from "./api.js";
@@ -45,6 +45,7 @@ function reducer(state: State, action: Action): State {
 
 export function useCanvasStore() {
   const [canvas, dispatch] = useReducer(reducer, null);
+  const [lastEvent, setLastEvent] = useState<SseEvent | null>(null);
 
   useEffect(() => {
     api.getCanvas().then((state) => dispatch({ type: "init", payload: state }));
@@ -52,10 +53,13 @@ export function useCanvasStore() {
     const es = new EventSource("/sse/canvas");
     es.onmessage = (e: MessageEvent<string>) => {
       const parsed = SseEventSchema.safeParse(JSON.parse(e.data));
-      if (parsed.success) dispatch(parsed.data);
+      if (parsed.success) {
+        dispatch(parsed.data);
+        setLastEvent(parsed.data);
+      }
     };
     return () => es.close();
   }, []);
 
-  return { canvas, dispatch };
+  return { canvas, dispatch, lastEvent };
 }

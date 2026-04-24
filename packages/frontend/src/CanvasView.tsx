@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Tldraw,
   createShapeId,
@@ -9,10 +9,9 @@ import {
   type TLRichText,
 } from "tldraw";
 import "tldraw/tldraw.css";
-import type { CanvasState, CanvasNode, CanvasEdge } from "@brain-map/shared";
+import type { CanvasState, CanvasNode, CanvasEdge, SseEvent } from "@brain-map/shared";
 import { api } from "./api.js";
 
-// tldraw color values that map to our palette
 const TLDRAW_COLOR_MAP: Record<string, string> = {
   yellow: "yellow",
   blue: "blue",
@@ -60,21 +59,40 @@ function getTextFromProps(props: Record<string, unknown>, editor: Editor): strin
   return renderPlaintextFromRichText(editor, richText);
 }
 
-interface Props {
-  canvas: CanvasState;
+function edgeBindings(edge: CanvasEdge) {
+  const arrowId = createShapeId(edge.id);
+  return [
+    {
+      type: "arrow",
+      fromId: arrowId,
+      toId: createShapeId(edge.fromNodeId),
+      props: { terminal: "start", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: true },
+    },
+    {
+      type: "arrow",
+      fromId: arrowId,
+      toId: createShapeId(edge.toNodeId),
+      props: { terminal: "end", normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: true },
+    },
+  ];
 }
 
-export function CanvasView({ canvas }: Props) {
+interface Props {
+  canvas: CanvasState;
+  lastEvent: SseEvent | null;
+}
+
+export function CanvasView({ canvas, lastEvent }: Props) {
   const editorRef = useRef<Editor | null>(null);
-  // Track shape IDs that were created by syncing from the server (not by the user)
-  const serverCreatedIds = useRef(new Set<string>());
+  // Tracks shape IDs of operations originated from the server so side-effect handlers skip them
+  const serverOriginatedIds = useRef(new Set<string>());
 
   const onMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
 
       const shapes = [];
-      const bindings = [];
+      const bindings: unknown[] = [];
 
       if (canvas.nodes.length > 0) {
         shapes.push(...canvas.nodes.map(nodeToTldraw));
@@ -82,48 +100,24 @@ export function CanvasView({ canvas }: Props) {
 
       if (canvas.edges.length > 0) {
         shapes.push(...canvas.edges.map(edgeToTldraw));
-        
         for (const edge of canvas.edges) {
-          const arrowId = createShapeId(edge.id);
-          bindings.push({
-            type: 'arrow',
-            fromId: arrowId,
-            toId: createShapeId(edge.fromNodeId),
-            props: {
-              terminal: 'start',
-              normalizedAnchor: { x: 0.5, y: 0.5 },
-              isExact: false,
-              isPrecise: true
-            }
-          });
-          bindings.push({
-            type: 'arrow',
-            fromId: arrowId,
-            toId: createShapeId(edge.toNodeId),
-            props: {
-              terminal: 'end',
-              normalizedAnchor: { x: 0.5, y: 0.5 },
-              isExact: false,
-              isPrecise: true
-            }
-          });
+          bindings.push(...edgeBindings(edge));
         }
       }
 
       if (shapes.length > 0) {
-        // Mark these as server-originated so we don't re-save them
-        shapes.forEach((s) => serverCreatedIds.current.add(s.id));
+        shapes.forEach((s) => serverOriginatedIds.current.add(s.id));
         editor.createShapes(shapes);
       }
-      
+
       if (bindings.length > 0) {
         editor.createBindings(bindings as any);
       }
 
       editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {
         if (shape.type !== "note") return;
-        if (serverCreatedIds.current.has(shape.id)) {
-          serverCreatedIds.current.delete(shape.id);
+        if (serverOriginatedIds.current.has(shape.id)) {
+          serverOriginatedIds.current.delete(shape.id);
           return;
         }
         const text = getTextFromProps(shape.props as Record<string, unknown>, editor);
@@ -135,6 +129,10 @@ export function CanvasView({ canvas }: Props) {
       editor.sideEffects.registerAfterChangeHandler("shape", (prev, next) => {
         const brainMapId = (next.meta as { brainMapId?: string }).brainMapId;
         if (!brainMapId) return;
+        if (serverOriginatedIds.current.has(next.id)) {
+          serverOriginatedIds.current.delete(next.id);
+          return;
+        }
         const text = getTextFromProps(next.props as Record<string, unknown>, editor);
         api
           .updateNode({ id: brainMapId, text, position: { x: next.x, y: next.y } })
@@ -142,6 +140,10 @@ export function CanvasView({ canvas }: Props) {
       });
 
       editor.sideEffects.registerAfterDeleteHandler("shape", (shape) => {
+        if (serverOriginatedIds.current.has(shape.id)) {
+          serverOriginatedIds.current.delete(shape.id);
+          return;
+        }
         const brainMapId = (shape.meta as { brainMapId?: string }).brainMapId;
         if (!brainMapId) return;
         api.deleteNode(brainMapId).catch(console.error);
@@ -149,6 +151,78 @@ export function CanvasView({ canvas }: Props) {
     },
     [canvas]
   );
+
+  // Apply live SSE events from MCP / other clients directly to the tldraw editor
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !lastEvent) return;
+
+    switch (lastEvent.type) {
+      case "node:added": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (editor.getShape(shapeId)) return;
+        const shape = nodeToTldraw(lastEvent.payload);
+        serverOriginatedIds.current.add(shape.id);
+        editor.createShapes([shape]);
+        break;
+      }
+      case "node:updated": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (!editor.getShape(shapeId)) return;
+        serverOriginatedIds.current.add(shapeId);
+        editor.updateShapes([{
+          id: shapeId,
+          type: "note",
+          x: lastEvent.payload.position.x,
+          y: lastEvent.payload.position.y,
+          props: {
+            richText: toRichText(lastEvent.payload.text),
+            color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as "yellow",
+          },
+        }]);
+        break;
+      }
+      case "node:deleted": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (!editor.getShape(shapeId)) return;
+        serverOriginatedIds.current.add(shapeId);
+        editor.deleteShapes([shapeId]);
+        break;
+      }
+      case "edge:added": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (editor.getShape(shapeId)) return;
+        const shape = edgeToTldraw(lastEvent.payload);
+        serverOriginatedIds.current.add(shapeId);
+        editor.createShapes([shape]);
+        editor.createBindings(edgeBindings(lastEvent.payload) as any);
+        break;
+      }
+      case "edge:deleted": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (!editor.getShape(shapeId)) return;
+        serverOriginatedIds.current.add(shapeId);
+        editor.deleteShapes([shapeId]);
+        break;
+      }
+      case "canvas:reset": {
+        const allShapes = editor.getCurrentPageShapes();
+        allShapes.forEach((s) => serverOriginatedIds.current.add(s.id));
+        if (allShapes.length > 0) editor.deleteShapes(allShapes.map((s) => s.id));
+
+        const nodeShapes = lastEvent.payload.nodes.map(nodeToTldraw);
+        const edgeShapes = lastEvent.payload.edges.map(edgeToTldraw);
+        const allNew = [...nodeShapes, ...edgeShapes];
+        allNew.forEach((s) => serverOriginatedIds.current.add(s.id));
+        if (allNew.length > 0) editor.createShapes(allNew);
+
+        const bindings: unknown[] = [];
+        for (const edge of lastEvent.payload.edges) bindings.push(...edgeBindings(edge));
+        if (bindings.length > 0) editor.createBindings(bindings as any);
+        break;
+      }
+    }
+  }, [lastEvent]);
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>
