@@ -28,6 +28,7 @@ export const api = {
   updateNode: ({ id, ...rest }: UpdateNodeInput) => req<CanvasNode>("PATCH", `/nodes/${id}`, rest),
   deleteNode: (id: string) => req<void>("DELETE", `/nodes/${id}`),
   connectNodes: (input: ConnectNodesInput) => req<CanvasEdge>("POST", "/edges", input),
+  updateEdge: ({ id, ...rest }: { id: string; label?: string }) => req<CanvasEdge>("PATCH", `/edges/${id}`, rest),
   deleteEdge: (id: string) => req<void>("DELETE", `/edges/${id}`),
   groupNodes: (input: { nodeIds: string[]; groupName: string; color?: string }) =>
     req<CanvasGroup>("POST", "/groups", input),

@@ -11,6 +11,7 @@ import {
   updateNode,
   deleteNode,
   connectNodes,
+  updateEdge,
   deleteEdge,
   groupNodes,
   deleteGroup,
@@ -98,6 +99,15 @@ async function main() {
     if (!deleted) { res.status(404).json({ error: "Edge not found" }); return; }
     broadcast({ type: "edge:deleted", payload: { id } });
     res.status(204).send();
+  });
+ 
+  app.patch("/api/edges/:id", (req, res) => {
+    const id = req.params["id"];
+    if (!id) { res.status(400).json({ error: "Missing id" }); return; }
+    const edge = updateEdge({ id, label: req.body.label });
+    if (!edge) { res.status(404).json({ error: "Edge not found" }); return; }
+    broadcast({ type: "edge:updated", payload: edge });
+    res.json(edge);
   });
 
   app.post("/api/groups", (req, res) => {

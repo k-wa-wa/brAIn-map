@@ -284,6 +284,15 @@ export function deleteEdge(id: string): boolean {
   return true;
 }
 
+export function updateEdge(input: { id: string; label?: string }): CanvasEdge | null {
+  const existing = queryOne("SELECT * FROM edges WHERE id = ?", [input.id]);
+  if (!existing) return null;
+  const label = input.label !== undefined ? input.label : (existing["label"] as string | null);
+  run("UPDATE edges SET label = ? WHERE id = ?", [label, input.id]);
+  touchCanvas();
+  return toEdge(queryOne("SELECT * FROM edges WHERE id = ?", [input.id])!);
+}
+
 export function groupNodes(input: { nodeIds: string[]; groupName: string; color: CanvasGroup["color"] }): CanvasGroup {
   const now = new Date().toISOString();
   const groupId = randomUUID();

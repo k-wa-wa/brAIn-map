@@ -20,6 +20,7 @@ import {
   updateNode,
   deleteNode,
   connectNodes,
+  updateEdge,
   deleteEdge,
   groupNodes,
   deleteGroup,
@@ -184,6 +185,23 @@ export function registerTools(server: McpServer) {
       const parsed = ConnectNodesInputSchema.parse(input);
       const edge = connectNodes(parsed);
       broadcast({ type: "edge:added", payload: edge });
+      return ok(edge);
+    }
+  );
+ 
+  reg(
+    "update_edge",
+    {
+      description: "Update the label of an existing edge",
+      inputSchema: {
+        id: z.string().uuid().describe("Edge ID"),
+        label: z.string().optional().describe("New label for the edge"),
+      }
+    },
+    async (input) => {
+      const edge = updateEdge({ id: input.id, label: input.label });
+      if (!edge) return ok({ success: false, error: "Edge not found" });
+      broadcast({ type: "edge:updated", payload: edge });
       return ok(edge);
     }
   );

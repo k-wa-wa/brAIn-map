@@ -7,9 +7,11 @@ import {
   type Editor,
   type TLShapeId,
   type TLRichText,
+  type TLShape,
+  type TLBinding,
 } from "tldraw";
 import "tldraw/tldraw.css";
-import type { CanvasState, CanvasNode, CanvasEdge, SseEvent } from "@brain-map/shared";
+import type { CanvasState, CanvasNode, CanvasEdge, SseEvent, NodeColor } from "@brain-map/shared";
 import { api } from "./api.js";
 
 const TLDRAW_COLOR_MAP: Record<string, string> = {
@@ -23,6 +25,10 @@ const TLDRAW_COLOR_MAP: Record<string, string> = {
   gray: "grey",
 } as const;
 
+const REVERSE_COLOR_MAP: Record<string, NodeColor> = Object.fromEntries(
+  Object.entries(TLDRAW_COLOR_MAP).map(([k, v]) => [v, k as NodeColor])
+);
+
 function nodeToTldraw(node: CanvasNode) {
   return {
     id: createShapeId(node.id) as TLShapeId,
@@ -31,7 +37,7 @@ function nodeToTldraw(node: CanvasNode) {
     y: node.position.y,
     props: {
       richText: toRichText(node.text),
-      color: (TLDRAW_COLOR_MAP[node.color] ?? "yellow") as "yellow",
+      color: (TLDRAW_COLOR_MAP[node.color] ?? "yellow") as any,
       size: "m" as const,
     },
     meta: { brainMapId: node.id },
@@ -53,12 +59,6 @@ function edgeToTldraw(edge: CanvasEdge) {
   };
 }
 
-function getTextFromProps(props: Record<string, unknown>, editor: Editor): string {
-  const richText = props["richText"] as TLRichText | undefined;
-  if (!richText) return "";
-  return renderPlaintextFromRichText(editor, richText);
-}
-
 function edgeBindings(edge: CanvasEdge) {
   const arrowId = createShapeId(edge.id);
   return [
@@ -77,6 +77,12 @@ function edgeBindings(edge: CanvasEdge) {
   ];
 }
 
+function getTextFromProps(props: Record<string, unknown>, editor: Editor): string {
+  const richText = props["richText"] as TLRichText | undefined;
+  if (!richText) return (props["text"] as string) || "";
+  return renderPlaintextFromRichText(editor, richText);
+}
+
 interface Props {
   canvas: CanvasState;
   lastEvent: SseEvent | null;
@@ -86,22 +92,74 @@ export function CanvasView({ canvas, lastEvent }: Props) {
   const editorRef = useRef<Editor | null>(null);
   // Tracks shape IDs of operations originated from the server so side-effect handlers skip them
   const serverOriginatedIds = useRef(new Set<string>());
+  // Timers for debouncing updates
+  const pendingUpdates = useRef(new Map<string, number>());
+
+  const debounce = (id: string, fn: () => void, delay = 500) => {
+    if (pendingUpdates.current.has(id)) {
+      clearTimeout(pendingUpdates.current.get(id));
+    }
+    pendingUpdates.current.set(id, window.setTimeout(() => {
+      pendingUpdates.current.delete(id);
+      fn();
+    }, delay));
+  };
+
+  const syncArrowBindings = useCallback((editor: Editor, arrowId: TLShapeId) => {
+    const arrow = editor.getShape(arrowId);
+    if (!arrow || arrow.type !== "arrow") return;
+
+    const bindings = editor.getBindingsFromShape(arrow, "arrow");
+    const startBinding = bindings.find((b) => (b.props as any).terminal === "start");
+    const endBinding = bindings.find((b) => (b.props as any).terminal === "end");
+
+    const startNodeId = startBinding ? (editor.getShape(startBinding.toId)?.meta as any)?.brainMapId : null;
+    const endNodeId = endBinding ? (editor.getShape(endBinding.toId)?.meta as any)?.brainMapId : null;
+
+    const brainMapEdgeId = (arrow.meta as any)?.brainMapEdgeId;
+
+    if (startNodeId && endNodeId) {
+      if (!brainMapEdgeId) {
+        // New connection
+        api.connectNodes({
+          fromNodeId: startNodeId,
+          toNodeId: endNodeId,
+          label: (arrow.props as any).text || ""
+        }).then(edge => {
+          serverOriginatedIds.current.add(arrow.id);
+          editor.updateShape({
+            id: arrow.id,
+            meta: { brainMapEdgeId: edge.id }
+          } as any);
+        }).catch(console.error);
+      }
+    } else if (brainMapEdgeId) {
+      // Connection lost
+      api.deleteEdge(brainMapEdgeId).then(() => {
+        serverOriginatedIds.current.add(arrow.id);
+        editor.updateShape({
+          id: arrow.id,
+          meta: { brainMapEdgeId: undefined }
+        } as any);
+      }).catch(console.error);
+    }
+  }, []);
 
   const onMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
 
-      const shapes = [];
-      const bindings: unknown[] = [];
+      const shapes: TLShape[] = [];
+      const bindings: TLBinding[] = [];
 
       if (canvas.nodes.length > 0) {
-        shapes.push(...canvas.nodes.map(nodeToTldraw));
+        shapes.push(...canvas.nodes.map(nodeToTldraw) as any);
       }
 
       if (canvas.edges.length > 0) {
-        shapes.push(...canvas.edges.map(edgeToTldraw));
+        shapes.push(...canvas.edges.map(edgeToTldraw) as any);
         for (const edge of canvas.edges) {
-          bindings.push(...edgeBindings(edge));
+          bindings.push(...edgeBindings(edge) as any);
         }
       }
 
@@ -111,9 +169,10 @@ export function CanvasView({ canvas, lastEvent }: Props) {
       }
 
       if (bindings.length > 0) {
-        editor.createBindings(bindings as any);
+        editor.createBindings(bindings);
       }
 
+      // --- Node Handlers ---
       editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {
         if (shape.type !== "note") return;
         if (serverOriginatedIds.current.has(shape.id)) {
@@ -121,22 +180,45 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           return;
         }
         const text = getTextFromProps(shape.props as any, editor);
+        const color = REVERSE_COLOR_MAP[(shape.props as any).color] ?? "yellow";
         api
-          .addNode({ type: "sticky", text, position: { x: shape.x, y: shape.y } })
+          .addNode({ type: "sticky", text, color, position: { x: shape.x, y: shape.y } })
+          .then(node => {
+            serverOriginatedIds.current.add(shape.id);
+            editor.updateShape({
+              id: shape.id,
+              meta: { brainMapId: node.id }
+            } as any);
+          })
           .catch(console.error);
       });
 
       editor.sideEffects.registerAfterChangeHandler("shape", (prev, next) => {
-        const brainMapId = (next.meta as { brainMapId?: string }).brainMapId;
-        if (!brainMapId) return;
         if (serverOriginatedIds.current.has(next.id)) {
           serverOriginatedIds.current.delete(next.id);
           return;
         }
-        const text = getTextFromProps(next.props as any, editor);
-        api
-          .updateNode({ id: brainMapId, text, position: { x: next.x, y: next.y } })
-          .catch(console.error);
+
+        if (next.type === "note") {
+          const brainMapId = (next.meta as any).brainMapId;
+          if (!brainMapId) return;
+          
+          debounce(next.id, () => {
+            const text = getTextFromProps(next.props as any, editor);
+            const color = REVERSE_COLOR_MAP[(next.props as any).color] ?? "yellow";
+            api
+              .updateNode({ id: brainMapId, text, color, position: { x: next.x, y: next.y } })
+              .catch(console.error);
+          });
+        } else if (next.type === "arrow") {
+          const brainMapEdgeId = (next.meta as any).brainMapEdgeId;
+          if (!brainMapEdgeId) return;
+
+          debounce(next.id, () => {
+            const label = (next.props as any).text || "";
+            api.updateEdge({ id: brainMapEdgeId, label }).catch(console.error);
+          });
+        }
       });
 
       editor.sideEffects.registerAfterDeleteHandler("shape", (shape) => {
@@ -144,12 +226,33 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           serverOriginatedIds.current.delete(shape.id);
           return;
         }
-        const brainMapId = (shape.meta as { brainMapId?: string }).brainMapId;
-        if (!brainMapId) return;
-        api.deleteNode(brainMapId).catch(console.error);
+        const brainMapId = (shape.meta as any).brainMapId;
+        if (brainMapId) {
+          api.deleteNode(brainMapId).catch(console.error);
+        }
+        const brainMapEdgeId = (shape.meta as any).brainMapEdgeId;
+        if (brainMapEdgeId) {
+          api.deleteEdge(brainMapEdgeId).catch(console.error);
+        }
+      });
+
+      // --- Binding Handlers (for Edges) ---
+      editor.sideEffects.registerAfterCreateHandler("binding", (binding) => {
+        if (binding.type !== "arrow") return;
+        syncArrowBindings(editor, binding.fromId);
+      });
+
+      editor.sideEffects.registerAfterChangeHandler("binding", (prev, next) => {
+        if (next.type !== "arrow") return;
+        syncArrowBindings(editor, next.fromId);
+      });
+
+      editor.sideEffects.registerAfterDeleteHandler("binding", (binding) => {
+        if (binding.type !== "arrow") return;
+        syncArrowBindings(editor, binding.fromId);
       });
     },
-    [canvas]
+    [canvas, syncArrowBindings]
   );
 
   // Apply live SSE events from MCP / other clients directly to the tldraw editor
@@ -163,12 +266,14 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         if (editor.getShape(shapeId)) return;
         const shape = nodeToTldraw(lastEvent.payload);
         serverOriginatedIds.current.add(shape.id);
-        editor.createShapes([shape]);
+        editor.createShapes([shape as any]);
         break;
       }
       case "node:updated": {
         const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
-        if (!editor.getShape(shapeId)) return;
+        const existing = editor.getShape(shapeId);
+        if (!existing) return;
+        
         serverOriginatedIds.current.add(shapeId);
         editor.updateShapes([{
           id: shapeId,
@@ -177,7 +282,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           y: lastEvent.payload.position.y,
           props: {
             richText: toRichText(lastEvent.payload.text),
-            color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as "yellow",
+            color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as any,
           },
         }]);
         break;
@@ -194,8 +299,18 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         if (editor.getShape(shapeId)) return;
         const shape = edgeToTldraw(lastEvent.payload);
         serverOriginatedIds.current.add(shapeId);
-        editor.createShapes([shape]);
+        editor.createShapes([shape as any]);
         editor.createBindings(edgeBindings(lastEvent.payload) as any);
+        break;
+      }
+      case "edge:updated": {
+        const shapeId = createShapeId(lastEvent.payload.id) as TLShapeId;
+        if (!editor.getShape(shapeId)) return;
+        serverOriginatedIds.current.add(shapeId);
+        editor.updateShapes([{
+          id: shapeId,
+          props: { text: lastEvent.payload.label || "" }
+        } as any]);
         break;
       }
       case "edge:deleted": {
@@ -214,11 +329,11 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         const edgeShapes = lastEvent.payload.edges.map(edgeToTldraw);
         const allNew = [...nodeShapes, ...edgeShapes];
         allNew.forEach((s) => serverOriginatedIds.current.add(s.id));
-        if (allNew.length > 0) editor.createShapes(allNew);
+        if (allNew.length > 0) editor.createShapes(allNew as any);
 
-        const bindings: unknown[] = [];
+        const bindings: any[] = [];
         for (const edge of lastEvent.payload.edges) bindings.push(...edgeBindings(edge));
-        if (bindings.length > 0) editor.createBindings(bindings as any);
+        if (bindings.length > 0) editor.createBindings(bindings);
         break;
       }
     }
