@@ -145,20 +145,30 @@ async function main(): Promise<void> {
   console.log();
 
   // ── verdict ───────────────────────────────────────────────────────────────────
-  const verdict = await ask("Result? [p]ass / [f]ail / [s]kip: ");
-  const notes = await ask("Notes (Enter to skip): ");
+  try {
+    const verdict = await ask("Result? [p]ass / [f]ail / [s]kip: ");
+    const notes = await ask("Notes (Enter to skip): ");
 
-  const result =
-    verdict.startsWith("p") ? "PASS" :
-    verdict.startsWith("f") ? "FAIL" : "SKIP";
+    const result =
+      verdict.startsWith("p") ? "PASS" :
+      verdict.startsWith("f") ? "FAIL" : "SKIP";
 
-  const timestamp = new Date().toISOString();
-  appendFileSync(RESULTS_LOG, `${timestamp}  ${result}  ${story.id}-${story.name}  ${notes}\n`);
+    const timestamp = new Date().toISOString();
+    appendFileSync(RESULTS_LOG, `${timestamp}  ${result}  ${story.id}-${story.name}  ${notes}\n`);
 
-  const colors = { PASS: "\x1b[32m", FAIL: "\x1b[31m", SKIP: "\x1b[33m" };
-  console.log(`\n  ${colors[result]}${result}\x1b[0m — logged to results.log\n`);
-
-  stopServer();
+    const colors = { PASS: "\x1b[32m", FAIL: "\x1b[31m", SKIP: "\x1b[33m" };
+    console.log(`\n  ${colors[result]}${result}\x1b[0m — logged to results.log\n`);
+  } catch (e: any) {
+    if (e?.code === "ABORT_ERR") {
+      const timestamp = new Date().toISOString();
+      appendFileSync(RESULTS_LOG, `${timestamp}  SKIP  ${story.id}-${story.name}  (Ctrl+C)\n`);
+      console.log("\n  \x1b[33mSKIP\x1b[0m — aborted with Ctrl+C, logged to results.log\n");
+    } else {
+      throw e;
+    }
+  } finally {
+    stopServer();
+  }
   process.exit(0);
 }
 

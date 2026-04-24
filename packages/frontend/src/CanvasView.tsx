@@ -19,7 +19,7 @@ const TLDRAW_COLOR_MAP: Record<string, string> = {
   red: "red",
   purple: "violet",
   orange: "orange",
-  pink: "pink",
+  pink: "light-red",
   gray: "grey",
 } as const;
 
