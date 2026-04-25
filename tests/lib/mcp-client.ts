@@ -21,11 +21,11 @@ export class McpTestClient {
     await this.client.close();
   }
 
-  async callTool(name: string, args: any = {}) {
+  async callTool<T = unknown>(name: string, args: Record<string, unknown> = {}): Promise<{ content: Array<{ type: "text"; text: string }> }> {
     return await this.client.callTool({
       name,
       arguments: args,
-    });
+    }) as { content: Array<{ type: "text"; text: string }> };
   }
 
   async listTools() {

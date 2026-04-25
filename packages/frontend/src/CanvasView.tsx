@@ -12,10 +12,16 @@ import {
   type TLArrowShape,
   type TLNoteShape,
   type TLShapePartial,
+  type TLDefaultColorStyle,
 } from "tldraw";
 import "tldraw/tldraw.css";
 import type { CanvasState, CanvasNode, CanvasEdge, SseEvent, NodeColor } from "@brain-map/shared";
 import { api } from "./api.js";
+
+type BrainMapMeta = {
+  brainMapId?: string;
+  brainMapEdgeId?: string;
+};
 
 const TLDRAW_COLOR_MAP: Record<string, string> = {
   yellow: "yellow",
@@ -40,7 +46,7 @@ function nodeToTldraw(node: CanvasNode): TLShapePartial<TLNoteShape> {
     y: node.position.y,
     props: {
       richText: toRichText(node.text),
-      color: (TLDRAW_COLOR_MAP[node.color] ?? "yellow") as any,
+      color: (TLDRAW_COLOR_MAP[node.color] ?? "yellow") as TLDefaultColorStyle,
       size: "m",
     },
     meta: { brainMapId: node.id },
@@ -80,9 +86,10 @@ function edgeBindings(edge: CanvasEdge) {
   ];
 }
 
-function getTextFromProps(props: Record<string, unknown>, editor: Editor): string {
-  const richText = props["richText"] as TLRichText | undefined;
-  if (!richText) return (props["label"] as string) || (props["text"] as string) || "";
+function getTextFromProps(props: unknown, editor: Editor): string {
+  const p = props as Record<string, unknown>;
+  const richText = p["richText"] as TLRichText | undefined;
+  if (!richText) return (p["label"] as string) || (p["text"] as string) || "";
   return renderPlaintextFromRichText(editor, richText);
 }
 
@@ -127,13 +134,13 @@ export function CanvasView({ canvas, lastEvent }: Props) {
     if (!arrow || arrow.type !== "arrow") return;
 
     const bindings = editor.getBindingsFromShape(arrow, "arrow");
-    const startBinding = bindings.find((b) => (b.props as any).terminal === "start");
-    const endBinding = bindings.find((b) => (b.props as any).terminal === "end");
+    const startBinding = bindings.find((b) => b.props.terminal === "start");
+    const endBinding = bindings.find((b) => b.props.terminal === "end");
 
-    const startNodeId = startBinding ? (editor.getShape(startBinding.toId)?.meta as any)?.brainMapId : null;
-    const endNodeId = endBinding ? (editor.getShape(endBinding.toId)?.meta as any)?.brainMapId : null;
+    const startNodeId = startBinding ? (editor.getShape(startBinding.toId)?.meta as BrainMapMeta)?.brainMapId : null;
+    const endNodeId = endBinding ? (editor.getShape(endBinding.toId)?.meta as BrainMapMeta)?.brainMapId : null;
 
-    const brainMapEdgeId = (arrow.meta as any)?.brainMapEdgeId;
+    const brainMapEdgeId = (arrow.meta as BrainMapMeta)?.brainMapEdgeId;
 
     if (startNodeId && endNodeId) {
       if (!brainMapEdgeId) {
@@ -142,7 +149,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           id: arrow.id.replace(/^shape:/, ""),
           fromNodeId: startNodeId,
           toNodeId: endNodeId,
-          label: getTextFromProps(arrow.props as any, editor)
+          label: getTextFromProps(arrow.props, editor)
         }).then(edge => {
           serverOriginatedIds.current.add(arrow.id);
           editor.updateShape({
@@ -205,7 +212,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         debounce("camera", () => {
           api.updateCamera(sessionId, { x: camera.x, y: camera.y, zoom: camera.z }).catch(console.error);
         }, 1000);
-      }, { scope: "local", source: "user" } as any);
+      }, { scope: "session", source: "user" });
 
       // --- Node Handlers ---
       editor.sideEffects.registerAfterCreateHandler("shape", (shape) => {
@@ -214,8 +221,8 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           serverOriginatedIds.current.delete(shape.id);
           return;
         }
-        const text = getTextFromProps(shape.props as any, editor);
-        const color = REVERSE_COLOR_MAP[(shape.props as any).color] ?? "yellow";
+        const text = getTextFromProps(shape.props, editor);
+        const color = REVERSE_COLOR_MAP[(shape.props as TLNoteShape["props"]).color] ?? "yellow";
         api
           .addNode({
             id: shape.id.replace(/^shape:/, ""),
@@ -242,22 +249,22 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         }
 
         if (next.type === "note") {
-          const brainMapId = (next.meta as any).brainMapId;
+          const brainMapId = (next.meta as BrainMapMeta).brainMapId;
           if (!brainMapId) return;
           
           debounce(next.id, () => {
-            const text = getTextFromProps(next.props as any, editor);
-            const color = REVERSE_COLOR_MAP[(next.props as any).color] ?? "yellow";
+            const text = getTextFromProps(next.props, editor);
+            const color = REVERSE_COLOR_MAP[(next.props as TLNoteShape["props"]).color] ?? "yellow";
             api
               .updateNode({ id: brainMapId, text, color, position: { x: next.x, y: next.y } })
               .catch(console.error);
           });
         } else if (next.type === "arrow") {
-          const brainMapEdgeId = (next.meta as any).brainMapEdgeId;
+          const brainMapEdgeId = (next.meta as BrainMapMeta).brainMapEdgeId;
           if (!brainMapEdgeId) return;
 
           debounce(next.id, () => {
-            const label = getTextFromProps(next.props as any, editor);
+            const label = getTextFromProps(next.props, editor);
             api.updateEdge({ id: brainMapEdgeId, label }).catch(console.error);
           });
         }
@@ -268,11 +275,11 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           serverOriginatedIds.current.delete(shape.id);
           return;
         }
-        const brainMapId = (shape.meta as any).brainMapId;
+        const brainMapId = (shape.meta as BrainMapMeta).brainMapId;
         if (brainMapId) {
           api.deleteNode(brainMapId).catch(console.error);
         }
-        const brainMapEdgeId = (shape.meta as any).brainMapEdgeId;
+        const brainMapEdgeId = (shape.meta as BrainMapMeta).brainMapEdgeId;
         if (brainMapEdgeId) {
           api.deleteEdge(brainMapEdgeId).catch(console.error);
         }
@@ -328,7 +335,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           y: lastEvent.payload.position.y,
           props: {
             richText: toRichText(lastEvent.payload.text),
-            color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as any,
+            color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as TLDefaultColorStyle,
           },
         } as TLShapePartial]);
         break;

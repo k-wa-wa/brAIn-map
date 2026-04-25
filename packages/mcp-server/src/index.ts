@@ -64,7 +64,7 @@ async function main() {
       type: parsed.data.type ?? "sticky",
       color: parsed.data.color ?? "yellow",
       position: parsed.data.position ?? { x: Math.random() * 800, y: Math.random() * 600 },
-    } as any);
+    });
     broadcast({ type: "node:added", payload: node });
     res.status(201).json(node);
   });
@@ -90,7 +90,12 @@ async function main() {
   app.post("/api/edges", (req, res) => {
     const parsed = ConnectNodesInputSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-    const edge = connectNodes(parsed.data as any);
+    const edge = connectNodes({
+      fromNodeId: parsed.data.fromNodeId,
+      toNodeId: parsed.data.toNodeId,
+      ...(parsed.data.label && { label: parsed.data.label }),
+      ...(parsed.data.id && { id: parsed.data.id }),
+    });
     broadcast({ type: "edge:added", payload: edge });
     res.status(201).json(edge);
   });

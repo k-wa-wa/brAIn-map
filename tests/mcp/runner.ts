@@ -37,12 +37,14 @@ async function runTest() {
 
     // 3. Add a node
     console.log("📝 Adding a node...");
+    const parseResult = <T>(res: { content: Array<{ text: string }> }): T => JSON.parse(res.content[0]!.text);
+
     const addResult = await client.callTool("add_node", {
       text: "Test Node",
       color: "blue",
       type: "sticky"
-    }) as any;
-    const node = JSON.parse(addResult.content[0].text);
+    });
+    const node = parseResult<{ id: string; text: string; color: string }>(addResult);
     assert.strictEqual(node.text, "Test Node");
     assert.strictEqual(node.color, "blue");
     const nodeId = node.id;
@@ -50,24 +52,24 @@ async function runTest() {
 
     // 4. Get canvas state
     console.log("📊 Checking canvas state...");
-    const stateResult = await client.callTool("get_canvas_state") as any;
-    const state = JSON.parse(stateResult.content[0].text);
+    const stateResult = await client.callTool("get_canvas_state");
+    const state = parseResult<{ nodes: Array<{ id: string }> }>(stateResult);
     assert.strictEqual(state.nodes.length, 1);
-    assert.strictEqual(state.nodes[0].id, nodeId);
+    assert.strictEqual(state.nodes[0]!.id, nodeId);
     console.log("✅ Canvas state verified");
 
     // 5. Add another node and connect them
     console.log("🔗 Adding second node and connecting...");
-    const addResult2 = await client.callTool("add_node", { text: "Second Node" }) as any;
-    const node2 = JSON.parse(addResult2.content[0].text);
+    const addResult2 = await client.callTool("add_node", { text: "Second Node" });
+    const node2 = parseResult<{ id: string }>(addResult2);
     const nodeId2 = node2.id;
 
     const connectResult = await client.callTool("connect_nodes", {
       fromNodeId: nodeId,
       toNodeId: nodeId2,
       label: "connects to"
-    }) as any;
-    const edge = JSON.parse(connectResult.content[0].text);
+    });
+    const edge = parseResult<{ fromNodeId: string; toNodeId: string; label: string }>(connectResult);
     assert.strictEqual(edge.fromNodeId, nodeId);
     assert.strictEqual(edge.toNodeId, nodeId2);
     assert.strictEqual(edge.label, "connects to");
@@ -75,10 +77,10 @@ async function runTest() {
 
     // 6. Search nodes
     console.log("🔍 Searching for nodes...");
-    const searchResult = await client.callTool("search_nodes", { query: "Test" }) as any;
-    const search = JSON.parse(searchResult.content[0].text);
+    const searchResult = await client.callTool("search_nodes", { query: "Test" });
+    const search = parseResult<{ count: number; nodes: Array<{ text: string }> }>(searchResult);
     assert.strictEqual(search.count, 1);
-    assert.strictEqual(search.nodes[0].text, "Test Node");
+    assert.strictEqual(search.nodes[0]!.text, "Test Node");
     console.log("✅ Search verified");
 
     console.log("\n🎉 All MCP tests passed!");
