@@ -391,11 +391,12 @@ export function registerTools(server: McpServer) {
     "layout_canvas",
     {
       description: `Rearrange all nodes into a clean layout and update their positions on the canvas.
-- "grid": places all nodes in a square grid. Best when nodes have no groups or you want a clean slate.
-- "cluster": places nodes in group-based clusters side by side. Ungrouped nodes come first, then each named group. Use this after grouping to make the visual structure match the logical structure.
-Call this after bulk_add_nodes or move_nodes_to_group to tidy up the canvas.`,
+- "radial": organic mind-map layout — groups are placed in angular sectors around a central point, with nodes spread at staggered radii within each sector. Gives a free-form, canvas-like feel. Use this as the default for brain maps.
+- "grid": flat square grid across all nodes. Use only when there are no groups or you want a minimal fallback.
+- "cluster": each group is a square mini-grid, groups placed side by side horizontally. Good for peer comparisons, but looks rigid.
+Always call layout_canvas after grouping to apply the final arrangement.`,
       inputSchema: {
-        strategy: z.enum(["grid", "cluster"]).describe('"grid" = flat square grid | "cluster" = grouped side by side'),
+        strategy: z.enum(["grid", "cluster", "radial"]).describe('"radial" = organic sectors (default for brain maps) | "grid" = flat grid | "cluster" = groups side by side'),
       },
     },
     async (input) => {

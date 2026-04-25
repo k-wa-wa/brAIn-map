@@ -415,20 +415,17 @@ export function moveNodesToGroup(
   return updated;
 }
 
-export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
+export function layoutCanvas(strategy: "grid" | "cluster" | "radial"): CanvasNode[] {
   const nodes = queryAll(
     "SELECT * FROM nodes WHERE canvas_id = ? ORDER BY created_at ASC",
     [CANVAS_ID]
   ).map(toNode);
   if (nodes.length === 0) return [];
 
-  const COL_W = 260;
-  const ROW_H = 260;
-  const PAD = 100;
-  const CLUSTER_GAP = 500;
   const updated: CanvasNode[] = [];
 
   if (strategy === "grid") {
+    const PAD = 100, COL_W = 260, ROW_H = 260;
     const cols = Math.ceil(Math.sqrt(nodes.length));
     for (const [i, node] of nodes.entries()) {
       const x = PAD + (i % cols) * COL_W;
@@ -436,8 +433,12 @@ export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
       const result = updateNode({ id: node.id, position: { x, y } });
       if (result) updated.push(result);
     }
-  } else {
-    // cluster: nodes in the same group are placed together
+  } else if (strategy === "radial") {
+    // radial: groups placed in angular sectors around a center, nodes
+    // spread organically within each sector at staggered radii.
+    const CENTER_X = 900, CENTER_Y = 700;
+    const INNER = 320, OUTER = 700, STAGGER = 120;
+
     const buckets = new Map<string | null, CanvasNode[]>();
     for (const node of nodes) {
       const key = node.groupId ?? null;
@@ -445,7 +446,48 @@ export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
       buckets.get(key)!.push(node);
     }
 
-    // ungrouped first, then each named group
+    const sections: CanvasNode[][] = [];
+    const ungrouped = buckets.get(null);
+    if (ungrouped && ungrouped.length > 0) sections.push(ungrouped);
+    for (const [key, members] of buckets) {
+      if (key !== null) sections.push(members);
+    }
+
+    const numSectors = sections.length;
+    const sectorSpan = (2 * Math.PI) / numSectors;
+
+    for (const [sIdx, section] of sections.entries()) {
+      // sector center angle; start at top (−π/2) and go clockwise
+      const sectorMid = -Math.PI / 2 + sIdx * sectorSpan + sectorSpan / 2;
+
+      for (const [i, node] of section.entries()) {
+        const n = section.length;
+        // distribute angle within 72% of sector to leave breathing room
+        const t = n === 1 ? 0 : (i / (n - 1) - 0.5);
+        const angle = sectorMid + t * sectorSpan * 0.72;
+
+        // radius: arc wave + even/odd stagger → organic, non-uniform depth
+        const wave = n === 1 ? 0.5 : i / (n - 1);
+        const radius = INNER + Math.sin(wave * Math.PI) * (OUTER - INNER) + (i % 2 === 0 ? 0 : STAGGER);
+
+        // subtract half node size (200) so the node center lands on radius
+        const x = CENTER_X + Math.cos(angle) * radius - 100;
+        const y = CENTER_Y + Math.sin(angle) * radius - 100;
+        const result = updateNode({ id: node.id, position: { x, y } });
+        if (result) updated.push(result);
+      }
+    }
+  } else {
+    // cluster: each group is a mini square grid, groups placed side by side
+    const PAD = 100, COL_W = 260, ROW_H = 260, GAP = 300;
+
+    const buckets = new Map<string | null, CanvasNode[]>();
+    for (const node of nodes) {
+      const key = node.groupId ?? null;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(node);
+    }
+
     const sections: CanvasNode[][] = [];
     const ungrouped = buckets.get(null);
     if (ungrouped && ungrouped.length > 0) sections.push(ungrouped);
@@ -462,7 +504,7 @@ export function layoutCanvas(strategy: "grid" | "cluster"): CanvasNode[] {
         const result = updateNode({ id: node.id, position: { x, y } });
         if (result) updated.push(result);
       }
-      startX += cols * COL_W + CLUSTER_GAP;
+      startX += cols * COL_W + GAP;
     }
   }
 

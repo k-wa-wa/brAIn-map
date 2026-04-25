@@ -9,6 +9,9 @@ import {
   type TLRichText,
   type TLShape,
   type TLBinding,
+  type TLArrowShape,
+  type TLNoteShape,
+  type TLShapePartial,
 } from "tldraw";
 import "tldraw/tldraw.css";
 import type { CanvasState, CanvasNode, CanvasEdge, SseEvent, NodeColor } from "@brain-map/shared";
@@ -29,31 +32,31 @@ const REVERSE_COLOR_MAP: Record<string, NodeColor> = Object.fromEntries(
   Object.entries(TLDRAW_COLOR_MAP).map(([k, v]) => [v, k as NodeColor])
 );
 
-function nodeToTldraw(node: CanvasNode) {
+function nodeToTldraw(node: CanvasNode): TLShapePartial<TLNoteShape> {
   return {
     id: createShapeId(node.id) as TLShapeId,
-    type: "note" as const,
+    type: "note",
     x: node.position.x,
     y: node.position.y,
     props: {
       richText: toRichText(node.text),
       color: (TLDRAW_COLOR_MAP[node.color] ?? "yellow") as any,
-      size: "m" as const,
+      size: "m",
     },
     meta: { brainMapId: node.id },
   };
 }
 
-function edgeToTldraw(edge: CanvasEdge) {
+function edgeToTldraw(edge: CanvasEdge): TLShapePartial<TLArrowShape> {
   return {
     id: createShapeId(edge.id) as TLShapeId,
-    type: "arrow" as const,
+    type: "arrow",
     x: 0,
     y: 0,
     props: {
       start: { x: 0, y: 0 },
       end: { x: 0, y: 0 },
-      text: edge.label || "",
+      richText: toRichText(edge.label || ""),
     },
     meta: { brainMapEdgeId: edge.id },
   };
@@ -79,7 +82,7 @@ function edgeBindings(edge: CanvasEdge) {
 
 function getTextFromProps(props: Record<string, unknown>, editor: Editor): string {
   const richText = props["richText"] as TLRichText | undefined;
-  if (!richText) return (props["text"] as string) || "";
+  if (!richText) return (props["label"] as string) || (props["text"] as string) || "";
   return renderPlaintextFromRichText(editor, richText);
 }
 
@@ -139,13 +142,14 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           id: arrow.id.replace(/^shape:/, ""),
           fromNodeId: startNodeId,
           toNodeId: endNodeId,
-          label: (arrow.props as any).text || ""
+          label: getTextFromProps(arrow.props as any, editor)
         }).then(edge => {
           serverOriginatedIds.current.add(arrow.id);
           editor.updateShape({
             id: arrow.id,
+            type: "arrow",
             meta: { brainMapEdgeId: edge.id }
-          } as any);
+          } as TLShapePartial);
         }).catch(console.error);
       }
     } else if (brainMapEdgeId) {
@@ -154,8 +158,9 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         serverOriginatedIds.current.add(arrow.id);
         editor.updateShape({
           id: arrow.id,
+          type: "arrow",
           meta: { brainMapEdgeId: undefined }
-        } as any);
+        } as TLShapePartial);
       }).catch(console.error);
     }
   }, []);
@@ -168,13 +173,12 @@ export function CanvasView({ canvas, lastEvent }: Props) {
       const bindings: TLBinding[] = [];
 
       if (canvas.nodes.length > 0) {
-        shapes.push(...canvas.nodes.map(nodeToTldraw) as any);
+        shapes.push(...(canvas.nodes.map(nodeToTldraw) as TLShape[]));
       }
-
       if (canvas.edges.length > 0) {
-        shapes.push(...canvas.edges.map(edgeToTldraw) as any);
+        shapes.push(...(canvas.edges.map(edgeToTldraw) as TLShape[]));
         for (const edge of canvas.edges) {
-          bindings.push(...edgeBindings(edge) as any);
+          bindings.push(...(edgeBindings(edge) as unknown as TLBinding[]));
         }
       }
 
@@ -224,8 +228,9 @@ export function CanvasView({ canvas, lastEvent }: Props) {
             serverOriginatedIds.current.add(shape.id);
             editor.updateShape({
               id: shape.id,
+              type: "note",
               meta: { brainMapId: node.id },
-            } as any);
+            } as TLShapePartial);
           })
           .catch(console.error);
       });
@@ -252,7 +257,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
           if (!brainMapEdgeId) return;
 
           debounce(next.id, () => {
-            const label = (next.props as any).text || "";
+            const label = getTextFromProps(next.props as any, editor);
             api.updateEdge({ id: brainMapEdgeId, label }).catch(console.error);
           });
         }
@@ -307,7 +312,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         if (editor.getShape(shapeId)) return;
         const shape = nodeToTldraw(lastEvent.payload);
         serverOriginatedIds.current.add(shape.id);
-        editor.createShapes([shape as any]);
+        editor.createShapes([shape as TLShape]);
         break;
       }
       case "node:updated": {
@@ -325,7 +330,7 @@ export function CanvasView({ canvas, lastEvent }: Props) {
             richText: toRichText(lastEvent.payload.text),
             color: (TLDRAW_COLOR_MAP[lastEvent.payload.color] ?? "yellow") as any,
           },
-        }]);
+        } as TLShapePartial]);
         break;
       }
       case "node:deleted": {
@@ -340,8 +345,8 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         if (editor.getShape(shapeId)) return;
         const shape = edgeToTldraw(lastEvent.payload);
         serverOriginatedIds.current.add(shapeId);
-        editor.createShapes([shape as any]);
-        editor.createBindings(edgeBindings(lastEvent.payload) as any);
+        editor.createShapes([shape as TLShape]);
+        editor.createBindings(edgeBindings(lastEvent.payload) as unknown as TLBinding[]);
         break;
       }
       case "edge:updated": {
@@ -350,8 +355,8 @@ export function CanvasView({ canvas, lastEvent }: Props) {
         serverOriginatedIds.current.add(shapeId);
         editor.updateShapes([{
           id: shapeId,
-          props: { text: lastEvent.payload.label || "" }
-        } as any]);
+          props: { richText: toRichText(lastEvent.payload.label || "") }
+        } as TLShapePartial]);
         break;
       }
       case "edge:deleted": {
@@ -368,12 +373,12 @@ export function CanvasView({ canvas, lastEvent }: Props) {
 
         const nodeShapes = lastEvent.payload.nodes.map(nodeToTldraw);
         const edgeShapes = lastEvent.payload.edges.map(edgeToTldraw);
-        const allNew = [...nodeShapes, ...edgeShapes];
+        const allNew = [...nodeShapes, ...edgeShapes] as TLShape[];
         allNew.forEach((s) => serverOriginatedIds.current.add(s.id));
-        if (allNew.length > 0) editor.createShapes(allNew as any);
+        if (allNew.length > 0) editor.createShapes(allNew);
 
-        const bindings: any[] = [];
-        for (const edge of lastEvent.payload.edges) bindings.push(...edgeBindings(edge));
+        const bindings: TLBinding[] = [];
+        for (const edge of lastEvent.payload.edges) bindings.push(...(edgeBindings(edge) as unknown as TLBinding[]));
         if (bindings.length > 0) editor.createBindings(bindings);
         break;
       }
